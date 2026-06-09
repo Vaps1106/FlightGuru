@@ -81,6 +81,7 @@ function Get-BookingURL {
 # -- Telegram -----------------------------------------------------------------
 function Send-TelegramAlert {
     param([string]$Message)
+    [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
     $token  = $Config.telegram.bot_token
     $chatId = $Config.telegram.chat_id
     $body   = @{
@@ -93,7 +94,7 @@ function Send-TelegramAlert {
             -Uri "https://api.telegram.org/bot$token/sendMessage" `
             -Method Post -Body $body `
             -ContentType "application/json; charset=utf-8"
-        if ($r.ok) { Write-Host "  [Telegram] Alert sent." -ForegroundColor Green }
+        if ($r.ok) { Write-Host "  [Telegram] Report sent." -ForegroundColor Green }
     }
     catch { Write-Warning "  [Telegram] Failed: $($_.Exception.Message)" }
 }
@@ -254,27 +255,51 @@ Save-State -Price $cheapest.Price
 
 $stopsLabel = if ($cheapest.Stops -eq 0) { "Nonstop" } elseif ($cheapest.Stops -eq 1) { "1 stop" } else { "$($cheapest.Stops) stops" }
 
-if ($alert) {
-    Write-Host "  *** PRICE BELOW TARGET - sending alert ***" -ForegroundColor Green
-    $msg = "[FlightGuru] PRICE ALERT!`n`n" +
-           "Route    : $originCity -> $destCity`n" +
-           "Airline  : $($cheapest.Airline) ($($cheapest.FlightNo))`n" +
-           "Date     : $($cheapest.Date)`n" +
-           "Dep Time : $($cheapest.DepTime)`n" +
-           "Stops    : $stopsLabel`n" +
-           "Price    : `$$($cheapest.Price) USD`n" +
-           "Target   : Below `$$target`n`n" +
-           "Book Now : $($cheapest.URL)"
-    Send-TelegramAlert -Message $msg
+# Build flight list for report (top 3)
+$flightLines = ""
+$rank = 1
+$flights | Select-Object -First 3 | ForEach-Object {
+    $s = if ($_.Stops -eq 0) { "Nonstop" } elseif ($_.Stops -eq 1) { "1 stop" } else { "$($_.Stops) stops" }
+    $flightLines += "#$rank  $($_.Airline) ($($_.FlightNo))`n"
+    $flightLines += "     Date : $($_.Date)  Dep : $($_.DepTime)`n"
+    $flightLines += "     Stops: $s`n"
+    $flightLines += "     Price: `$$($_.Price) USD`n"
+    $flightLines += "     Book : $($_.URL)`n`n"
+    $rank++
 }
-elseif ($cheapest.Price -lt $lastLow) {
+
+# Status line
+$priceChange = ""
+if ($cheapest.Price -lt $lastLow -and $lastLow -ne 9999) {
     $drop = $lastLow - $cheapest.Price
+    $priceChange = "Price dropped `$$drop since last check!"
     Write-Host "  Price dropped `$$drop since last check (`$$lastLow -> `$$($cheapest.Price))" -ForegroundColor Yellow
-    Write-Host "  Still above target. No alert sent." -ForegroundColor Yellow
 }
-else {
-    Write-Host "  Price `$$($cheapest.Price) is above target `$$target. No alert." -ForegroundColor Yellow
+
+if ($alert) {
+    $status = "*** PRICE BELOW TARGET ***"
+    Write-Host "  *** PRICE BELOW TARGET - alert sent ***" -ForegroundColor Green
+} else {
+    $status = "Above target (monitoring...)"
+    Write-Host "  Price `$$($cheapest.Price) is above target `$$target." -ForegroundColor Yellow
 }
+
+# Always send Telegram report
+$msg = "[FlightGuru] Price Check Report`n" +
+       "$(Get-Date -Format 'yyyy-MM-dd HH:mm')`n" +
+       "----------------------------------------`n" +
+       "Route  : $originCity -> $destCity`n" +
+       "Month  : $month`n" +
+       "Target : Below `$$target USD`n" +
+       "Status : $status`n"
+
+if ($priceChange -ne "") { $msg += "Note   : $priceChange`n" }
+
+$msg += "----------------------------------------`n`n" +
+        "Top Flights Found:`n`n" +
+        $flightLines
+
+Send-TelegramAlert -Message $msg
 
 Write-Host ""
 Write-Host "  Log: logs\price_history.csv"
