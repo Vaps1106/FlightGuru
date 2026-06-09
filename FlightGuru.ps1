@@ -1,10 +1,10 @@
-#Requires -Version 5.1
-# FlightGuru.ps1 — Flight Price Monitor
+﻿#Requires -Version 5.1
+# FlightGuru.ps1 - Flight Price Monitor (Travelpayouts API)
 #
 # Usage:
-#   .\FlightGuru.ps1            — run a price check right now
-#   .\FlightGuru.ps1 -Install   — register Windows Task Scheduler (every 6 hours, no expiry)
-#   .\FlightGuru.ps1 -Uninstall — remove the scheduled task
+#   .\FlightGuru.ps1            - run a price check right now
+#   .\FlightGuru.ps1 -Install   - register Windows Task Scheduler (every 6 hours, no expiry)
+#   .\FlightGuru.ps1 -Uninstall - remove the scheduled task
 
 param(
     [switch]$Install,
@@ -14,30 +14,71 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Continue"
 
-# Required for Telegram API on Windows 10 / PowerShell 5.1
+# Required for HTTPS on Windows 10 / PowerShell 5.1
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
-# ── Paths ─────────────────────────────────────────────────────────────────────
+# -- Paths --------------------------------------------------------------------
 $Root       = $PSScriptRoot
 $ConfigFile = Join-Path $Root "config.json"
 $StateFile  = Join-Path $Root "state.json"
 $LogDir     = Join-Path $Root "logs"
 $LogFile    = Join-Path $LogDir "price_history.csv"
 
-# ── Config ────────────────────────────────────────────────────────────────────
+# -- Config -------------------------------------------------------------------
 if (-not (Test-Path $ConfigFile)) {
-    Write-Error "config.json not found. Copy config.example.json to config.json and fill in your details."
+    Write-Error "config.json not found. Copy config.example.json to config.json."
     exit 1
 }
 $Config = Get-Content $ConfigFile -Raw | ConvertFrom-Json
 
-# ── Init ──────────────────────────────────────────────────────────────────────
+# -- Init ---------------------------------------------------------------------
 if (-not (Test-Path $LogDir))  { New-Item -ItemType Directory -Path $LogDir | Out-Null }
 if (-not (Test-Path $LogFile)) {
-    "Timestamp,Source,Price_USD,Below_Target,URL" | Out-File $LogFile -Encoding UTF8
+    "Timestamp,Airline,FlightNo,DepartureDate,DepartureTime,Stops,Price_USD,Below_Target,BookingURL" |
+        Out-File $LogFile -Encoding UTF8
 }
 
-# ── Telegram ──────────────────────────────────────────────────────────────────
+# -- Airline code lookup ------------------------------------------------------
+$AirlineNames = @{
+    "AI" = "Air India"
+    "EY" = "Etihad Airways"
+    "EK" = "Emirates"
+    "QR" = "Qatar Airways"
+    "BA" = "British Airways"
+    "RJ" = "Royal Jordanian"
+    "GF" = "Gulf Air"
+    "KU" = "Kuwait Airways"
+    "UA" = "United Airlines"
+    "AA" = "American Airlines"
+    "AC" = "Air Canada"
+    "VS" = "Virgin Atlantic"
+    "LH" = "Lufthansa"
+    "TK" = "Turkish Airlines"
+    "SQ" = "Singapore Airlines"
+    "CX" = "Cathay Pacific"
+    "MS" = "EgyptAir"
+    "ET" = "Ethiopian Airlines"
+    "WY" = "Oman Air"
+    "SV" = "Saudia"
+}
+
+function Get-AirlineName([string]$code) {
+    if ($AirlineNames.ContainsKey($code)) { return $AirlineNames[$code] }
+    return $code
+}
+
+# -- Booking URL --------------------------------------------------------------
+function Get-BookingURL {
+    param([string]$Origin, [string]$Destination, [string]$DepartDate)
+    # DepartDate format: YYYY-MM-DD
+    $parts = $DepartDate -split "-"
+    $dd    = $parts[2]
+    $mm    = $parts[1]
+    # Aviasales deep-link format: {ORIGIN}{DD}{MM}{DEST}{PAX}
+    return "https://www.aviasales.com/search/$Origin$dd$mm${Destination}1"
+}
+
+# -- Telegram -----------------------------------------------------------------
 function Send-TelegramAlert {
     param([string]$Message)
     $token  = $Config.telegram.bot_token
@@ -50,82 +91,63 @@ function Send-TelegramAlert {
     try {
         $r = Invoke-RestMethod `
             -Uri "https://api.telegram.org/bot$token/sendMessage" `
-            -Method Post `
-            -Body $body `
+            -Method Post -Body $body `
             -ContentType "application/json; charset=utf-8"
         if ($r.ok) { Write-Host "  [Telegram] Alert sent." -ForegroundColor Green }
     }
-    catch {
-        Write-Warning "  [Telegram] Failed: $($_.Exception.Message)"
-    }
+    catch { Write-Warning "  [Telegram] Failed: $($_.Exception.Message)" }
 }
 
-# ── Price Search ──────────────────────────────────────────────────────────────
-function Search-Prices {
-    $found   = [System.Collections.Generic.List[PSCustomObject]]::new()
-    $headers = @{
-        "User-Agent"      = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
-        "Accept-Language" = "en-US,en;q=0.9"
-        "Accept"          = "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
-    }
+# -- Fetch flights from Travelpayouts -----------------------------------------
+function Get-Flights {
+    param([string]$Origin, [string]$Destination, [string]$Month, [string]$Token)
 
-    function Get-MinPrice([string]$html) {
-        $matches = [regex]::Matches($html, '\$\s*(\d{3,4})')
-        $matches |
-            ForEach-Object { [int]$_.Groups[1].Value } |
-            Where-Object   { $_ -ge 200 -and $_ -le 5000 } |
-            Sort-Object    |
-            Select-Object -First 1
-    }
+    # Try mid-month date; API returns nearest available prices around that date
+    $searchDate = "$Month-15"
+    $uri = "https://api.travelpayouts.com/v1/prices/calendar" +
+           "?origin=$Origin&destination=$Destination" +
+           "&depart_date=$searchDate&one_way=true&currency=usd&token=$Token"
 
-    # Source 1 — Bing search (most reliable, no JS needed)
     try {
-        Write-Host "  Bing    ..." -NoNewline
-        $q    = "cheapest+one+way+flight+Mumbai+BOM+New+York+economy+August+2026+price+USD"
-        $html = (Invoke-WebRequest "https://www.bing.com/search?q=$q" `
-                    -Headers $headers -UseBasicParsing -TimeoutSec 20).Content
-        $p = Get-MinPrice $html
-        if ($p) {
-            $found.Add([PSCustomObject]@{
-                Source = "Bing"
-                Price  = $p
-                URL    = "https://www.bing.com/search?q=$q"
+        $response = Invoke-RestMethod -Uri $uri -Method Get -TimeoutSec 20
+        if (-not $response.success) {
+            Write-Warning "  API returned success=false"
+            return @()
+        }
+
+        $flights = [System.Collections.Generic.List[PSCustomObject]]::new()
+        $data    = $response.data
+
+        # PSCustomObject properties = date keys
+        $data.PSObject.Properties | ForEach-Object {
+            $date  = $_.Name
+            $f     = $_.Value
+            $code  = $f.airline
+            $name  = Get-AirlineName $code
+            $depDT = [datetime]$f.departure_at
+            $url   = Get-BookingURL -Origin $Origin -Destination $Destination -DepartDate $date
+
+            $flights.Add([PSCustomObject]@{
+                Date      = $date
+                Airline   = $name
+                Code      = $code
+                FlightNo  = "$code$($f.flight_number)"
+                DepTime   = $depDT.ToString("HH:mm")
+                Stops     = [int]$f.transfers
+                Price     = [int]$f.price
+                URL       = $url
             })
-            Write-Host " `$$p" -ForegroundColor Cyan
-        } else { Write-Host " no price found" -ForegroundColor Yellow }
-    }
-    catch { Write-Host " error: $($_.Exception.Message)" -ForegroundColor Red }
+        }
 
-    # Source 2 — Kayak route page
-    try {
-        Write-Host "  Kayak   ..." -NoNewline
-        $uri  = "https://www.kayak.com/flight-routes/Mumbai-Chhatrapati-Shivaji-BOM/New-York-NYC"
-        $html = (Invoke-WebRequest $uri -Headers $headers -UseBasicParsing -TimeoutSec 20).Content
-        $p = Get-MinPrice $html
-        if ($p) {
-            $found.Add([PSCustomObject]@{ Source = "Kayak"; Price = $p; URL = $uri })
-            Write-Host " `$$p" -ForegroundColor Cyan
-        } else { Write-Host " no price found" -ForegroundColor Yellow }
+        return ($flights | Sort-Object Price)
     }
-    catch { Write-Host " error: $($_.Exception.Message)" -ForegroundColor Red }
-
-    # Source 3 — Momondo route page
-    try {
-        Write-Host "  Momondo ..." -NoNewline
-        $uri  = "https://www.momondo.com/flights/mumbai/new-york-city"
-        $html = (Invoke-WebRequest $uri -Headers $headers -UseBasicParsing -TimeoutSec 20).Content
-        $p = Get-MinPrice $html
-        if ($p) {
-            $found.Add([PSCustomObject]@{ Source = "Momondo"; Price = $p; URL = $uri })
-            Write-Host " `$$p" -ForegroundColor Cyan
-        } else { Write-Host " no price found" -ForegroundColor Yellow }
+    catch {
+        Write-Warning "  API error: $($_.Exception.Message)"
+        return @()
     }
-    catch { Write-Host " error: $($_.Exception.Message)" -ForegroundColor Red }
-
-    return $found
 }
 
-# ── State ─────────────────────────────────────────────────────────────────────
+# -- State --------------------------------------------------------------------
 function Get-LastPrice {
     if (Test-Path $StateFile) {
         return [int]((Get-Content $StateFile -Raw | ConvertFrom-Json).last_price)
@@ -134,47 +156,39 @@ function Get-LastPrice {
 }
 
 function Save-State([int]$Price) {
-    @{
-        last_price = $Price
-        updated    = (Get-Date -Format "yyyy-MM-dd HH:mm:ss")
-    } | ConvertTo-Json | Out-File $StateFile -Encoding UTF8
+    @{ last_price = $Price; updated = (Get-Date -Format "yyyy-MM-dd HH:mm:ss") } |
+        ConvertTo-Json | Out-File $StateFile -Encoding UTF8
 }
 
-# ── Logging ───────────────────────────────────────────────────────────────────
-function Write-PriceLog {
-    param($Results, [bool]$Alert)
-    $ts = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
-    foreach ($r in $Results) {
-        "$ts,$($r.Source),$($r.Price),$Alert,$($r.URL)" |
-            Out-File $LogFile -Append -Encoding UTF8
-    }
+# -- Log ----------------------------------------------------------------------
+function Write-FlightLog {
+    param($Flight, [bool]$Alert)
+    $ts   = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+    $line = "$ts,$($Flight.Airline),$($Flight.FlightNo),$($Flight.Date),$($Flight.DepTime),$($Flight.Stops),$($Flight.Price),$Alert,$($Flight.URL)"
+    $line | Out-File $LogFile -Append -Encoding UTF8
 }
 
-# ── Scheduler ─────────────────────────────────────────────────────────────────
+# -- Scheduler ----------------------------------------------------------------
 $TaskName = "FlightGuru_Monitor"
 
 function Install-Scheduler {
     $script   = Join-Path $Root "FlightGuru.ps1"
     $action   = New-ScheduledTaskAction `
-                    -Execute "powershell.exe" `
-                    -Argument "-NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$script`""
+        -Execute "powershell.exe" `
+        -Argument "-NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$script`""
     $trigger  = New-ScheduledTaskTrigger `
-                    -Once -At (Get-Date).AddMinutes(2) `
-                    -RepetitionInterval (New-TimeSpan -Hours 6)
+        -Once -At (Get-Date).AddMinutes(2) `
+        -RepetitionInterval (New-TimeSpan -Hours 6)
     $settings = New-ScheduledTaskSettingsSet `
-                    -StartWhenAvailable `
-                    -RunOnlyIfNetworkAvailable `
-                    -ExecutionTimeLimit (New-TimeSpan -Minutes 10)
+        -StartWhenAvailable -RunOnlyIfNetworkAvailable `
+        -ExecutionTimeLimit (New-TimeSpan -Minutes 10)
     Register-ScheduledTask `
-        -TaskName $TaskName `
-        -Action   $action `
-        -Trigger  $trigger `
-        -Settings $settings `
-        -RunLevel Limited `
-        -Force | Out-Null
+        -TaskName $TaskName -Action $action `
+        -Trigger $trigger -Settings $settings `
+        -RunLevel Limited -Force | Out-Null
     Write-Host ""
     Write-Host "  Task '$TaskName' registered." -ForegroundColor Green
-    Write-Host "  Runs every 6 hours. No expiry — you control when to stop." -ForegroundColor Gray
+    Write-Host "  Runs every 6 hours. No expiry - you control when to stop." -ForegroundColor Gray
     Write-Host "  To remove: .\FlightGuru.ps1 -Uninstall" -ForegroundColor Gray
 }
 
@@ -183,67 +197,83 @@ function Uninstall-Scheduler {
         Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false
         Write-Host "  Task '$TaskName' removed." -ForegroundColor Yellow
     } else {
-        Write-Host "  Task '$TaskName' not found — nothing to remove." -ForegroundColor Gray
+        Write-Host "  Task '$TaskName' not found - nothing to remove." -ForegroundColor Gray
     }
 }
 
-# ── Main ──────────────────────────────────────────────────────────────────────
+# -- Main ---------------------------------------------------------------------
 if ($Install)   { Install-Scheduler;   exit 0 }
 if ($Uninstall) { Uninstall-Scheduler; exit 0 }
 
-$origin      = $Config.search.origin_city
-$destination = $Config.search.destination_city
+$origin      = $Config.search.origin_iata
+$destination = $Config.search.destination_iata
 $target      = [int]$Config.search.target_price
-$month       = $Config.search.month_label
+$month       = $Config.search.search_month
+$token       = $Config.travelpayouts.api_token
+$originCity  = $Config.search.origin_city
+$destCity    = $Config.search.destination_city
 
 Write-Host ""
 Write-Host "================================" -ForegroundColor Cyan
-Write-Host "  FlightGuru — Price Check" -ForegroundColor Cyan
+Write-Host "  FlightGuru - Price Check" -ForegroundColor Cyan
 Write-Host "================================" -ForegroundColor Cyan
-Write-Host "  Route  : $origin → $destination"
+Write-Host "  Route  : $originCity -> $destCity"
 Write-Host "  Month  : $month"
 Write-Host "  Target : Below `$$target USD"
 Write-Host "  Time   : $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')"
 Write-Host "--------------------------------"
+Write-Host "  Fetching from Travelpayouts API..."
 
-$results = Search-Prices
+$flights = Get-Flights -Origin $origin -Destination $destination -Month $month -Token $token
 
-if ($results.Count -eq 0) {
-    Write-Warning "No prices retrieved from any source. Check your internet connection."
-    exit 1
+if ($flights.Count -eq 0) {
+    Write-Warning "  No flights returned. Data for $month may not be cached yet - will retry next cycle."
+    exit 0
 }
 
-$lowest  = $results | Sort-Object Price | Select-Object -First 1
-$lastLow = Get-LastPrice
-$alert   = $lowest.Price -lt $target
+Write-Host ""
+Write-Host "  Results:" -ForegroundColor White
+$flights | ForEach-Object {
+    $stops = if ($_.Stops -eq 0) { "Nonstop" } elseif ($_.Stops -eq 1) { "1 stop" } else { "$($_.Stops) stops" }
+    Write-Host ("  [{0}] {1,-22} {2}  {3,-8}  `${4}" -f $_.Date, $_.Airline, $_.DepTime, $stops, $_.Price)
+}
+
+$cheapest = $flights | Select-Object -First 1
+$lastLow  = Get-LastPrice
+$alert    = $cheapest.Price -lt $target
 
 Write-Host ""
-Write-Host "  Lowest found : `$$($lowest.Price) via $($lowest.Source)"
-Write-Host "  Last known   : `$$lastLow"
-Write-Host "  Target       : Below `$$target"
+Write-Host ("  Cheapest : {0} {1} on {2} at {3} - `${4}" -f `
+    $cheapest.Airline, $cheapest.FlightNo, $cheapest.Date, $cheapest.DepTime, $cheapest.Price) -ForegroundColor Cyan
+Write-Host "  Last low : `$$lastLow"
+Write-Host "  Target   : Below `$$target"
 Write-Host ""
 
-Write-PriceLog -Results $results -Alert $alert
-Save-State -Price $lowest.Price
+Write-FlightLog -Flight $cheapest -Alert $alert
+Save-State -Price $cheapest.Price
+
+$stopsLabel = if ($cheapest.Stops -eq 0) { "Nonstop" } elseif ($cheapest.Stops -eq 1) { "1 stop" } else { "$($cheapest.Stops) stops" }
 
 if ($alert) {
-    Write-Host "  *** PRICE BELOW TARGET — sending alert ***" -ForegroundColor Green
-    $msg = "✈ FLIGHT PRICE ALERT!`n`n" +
-           "Route : $origin → $destination`n" +
-           "Price : `$$($lowest.Price) USD`n" +
-           "Target: Below `$$target`n" +
-           "Month : $month`n" +
-           "Source: $($lowest.Source)`n`n" +
-           "Book Now: $($lowest.URL)"
+    Write-Host "  *** PRICE BELOW TARGET - sending alert ***" -ForegroundColor Green
+    $msg = "[FlightGuru] PRICE ALERT!`n`n" +
+           "Route    : $originCity -> $destCity`n" +
+           "Airline  : $($cheapest.Airline) ($($cheapest.FlightNo))`n" +
+           "Date     : $($cheapest.Date)`n" +
+           "Dep Time : $($cheapest.DepTime)`n" +
+           "Stops    : $stopsLabel`n" +
+           "Price    : `$$($cheapest.Price) USD`n" +
+           "Target   : Below `$$target`n`n" +
+           "Book Now : $($cheapest.URL)"
     Send-TelegramAlert -Message $msg
 }
-elseif ($lowest.Price -lt $lastLow) {
-    $drop = $lastLow - $lowest.Price
-    Write-Host "  Price dropped `$$drop since last check (`$$lastLow → `$$($lowest.Price))" -ForegroundColor Yellow
+elseif ($cheapest.Price -lt $lastLow) {
+    $drop = $lastLow - $cheapest.Price
+    Write-Host "  Price dropped `$$drop since last check (`$$lastLow -> `$$($cheapest.Price))" -ForegroundColor Yellow
     Write-Host "  Still above target. No alert sent." -ForegroundColor Yellow
 }
 else {
-    Write-Host "  Price `$$($lowest.Price) is above target `$$target. No alert." -ForegroundColor Yellow
+    Write-Host "  Price `$$($cheapest.Price) is above target `$$target. No alert." -ForegroundColor Yellow
 }
 
 Write-Host ""

@@ -1,6 +1,9 @@
 {
+  "travelpayouts": {
+    "api_token": "YOUR_TRAVELPAYOUTS_TOKEN_HERE"
+  },
   "telegram": {
-    "bot_token": "YOUR_BOT_TOKEN_HERE",
+    "bot_token": "YOUR_TELEGRAM_BOT_TOKEN_HERE",
     "chat_id": "YOUR_CHAT_ID_HERE"
   },
   "search": {
@@ -8,7 +11,7 @@
     "destination_city": "New York",
     "origin_iata": "BOM",
     "destination_iata": "NYC",
-    "month_label": "August 2026",
+    "search_month": "2026-08",
     "target_price": 500,
     "currency": "USD"
   }
