@@ -1,4 +1,7 @@
 {
+  "serpapi": {
+    "api_key": "YOUR_SERPAPI_KEY_HERE"
+  },
   "travelpayouts": {
     "api_token": "YOUR_TRAVELPAYOUTS_TOKEN_HERE"
   },
@@ -10,7 +13,7 @@
     "origin_city": "Mumbai",
     "destination_city": "New York",
     "origin_iata": "BOM",
-    "destination_iata": "NYC",
+    "destination_iata": "JFK",
     "search_month": "2026-08",
     "target_price": 500,
     "currency": "USD"
