@@ -2,9 +2,18 @@
 
 ## Where it runs
 GitHub Actions — no server. Two workflows:
-- `monitor.yml` — scheduled price check (cron every 8h) + manual "Run workflow"
-  button. Commits updated `data/flightguru.db` back to the repo.
+- `monitor.yml` — **manual-only** price check (`workflow_dispatch`); runs when you
+  trigger it. Commits updated `data/flightguru.db` back to the repo.
 - `tests.yml` — runs the test suite on every push/PR.
+
+## How to trigger a run
+- **GitHub mobile app / website:** Actions → monitor → Run workflow.
+- **Command line:** `gh workflow run monitor.yml`
+- **Claude mobile app:** with the GitHub connector enabled (Actions read+write),
+  ask Claude to "run the monitor workflow in Vaps1106/FlightGuru on master".
+- **Phone Shortcut:** POST to
+  `https://api.github.com/repos/Vaps1106/FlightGuru/actions/workflows/monitor.yml/dispatches`
+  with body `{"ref":"master"}` and a fine-grained token (Actions: read+write).
 
 ## The four cloud secrets
 Set these as GitHub Actions secrets (the cloud equivalent of `.env`):
@@ -33,10 +42,11 @@ then Actions tab → monitor → Run workflow.
    is committed back by the run.
 5. Confirm the 8-hour schedule is active (Actions tab shows upcoming runs).
 
-## Changing the schedule
-Edit the `cron` line in `monitor.yml`. Format is `minute hour day month weekday`
-in **UTC**. `0 */8 * * *` = every 8 hours.
+## Re-enabling an automatic schedule (optional)
+The monitor is manual-only by default. To make it run on a timer again, add a
+`schedule` block under `on:` in `monitor.yml`, e.g. `- cron: "0 */8 * * *"`
+(every 8 hours, UTC). Format is `minute hour day month weekday`.
 
 ## Notes
-- Cron timing is best-effort and can be delayed a few minutes.
+- Manual runs have no timing concerns; each run is one search + one Telegram report.
 - Keep the repo **private**; usage stays within the free Actions minutes.

@@ -26,8 +26,9 @@ that file in the repo.
 - **No alerts arriving:** check the latest `monitor` run logs in the Actions tab;
   confirm the four secrets are set; confirm the Telegram chat ID is correct.
 - **"Missing required environment variable":** a secret/`.env` value is unset.
-- **Workflow stopped running:** GitHub disables crons after 60 days of no repo
-  activity — the commit-back step normally prevents this; push any change to re-arm.
+- **Nothing happens:** the monitor is manual-only — it only runs when you trigger
+  it (GitHub app, `gh workflow run monitor.yml`, a phone Shortcut, or the Claude
+  GitHub connector). There is no automatic schedule by design.
 - **Amadeus errors:** verify keys, and that `AMADEUS_ENV` matches the keys' tier
   (test vs production).
 
