@@ -1,0 +1,49 @@
+# OPERATIONS.md
+
+## Run a check now
+GitHub → **Actions** tab → **monitor** → **Run workflow**.
+Or locally: `python -m flightguru.main`.
+
+## Pause / resume / set active window (control usage)
+Edit `control.json` at the repo root, then push (to apply in the cloud):
+- **Pause now:** set `"enabled": false`. The next run exits immediately and makes
+  **no API calls**. Set back to `true` to resume.
+- **Auto-start / auto-stop:** `"active_from"` and `"active_until"` (YYYY-MM-DD,
+  UTC). Monitoring only runs within that window — so it stops on its own after
+  the trip dates. Leave a date as `""` to remove that bound.
+
+Example — paused:
+```json
+{ "enabled": false, "active_from": "2026-06-10", "active_until": "2026-08-14" }
+```
+(You can also fully stop the schedule via GitHub → Actions → monitor → "…" → Disable workflow.)
+
+## See history
+Open `data/flightguru.db` (any SQLite viewer), or review the commit history of
+that file in the repo.
+
+## Common issues
+- **No alerts arriving:** check the latest `monitor` run logs in the Actions tab;
+  confirm the four secrets are set; confirm the Telegram chat ID is correct.
+- **"Missing required environment variable":** a secret/`.env` value is unset.
+- **Workflow stopped running:** GitHub disables crons after 60 days of no repo
+  activity — the commit-back step normally prevents this; push any change to re-arm.
+- **Amadeus errors:** verify keys, and that `AMADEUS_ENV` matches the keys' tier
+  (test vs production).
+
+## Health check
+Run `python -m flightguru.main --health` (or trigger it in Actions). It verifies
+a provider is configured and that the Telegram bot is reachable. Exit code 0 = OK.
+
+## Monitoring
+- Every run sends a Telegram message — that doubles as a heartbeat: if messages
+  stop arriving, something is wrong, check the latest `monitor` run logs.
+- Local runs also write a timestamped, rotating log to `logs/flightguru.log`.
+- Transient API failures auto-retry with backoff (`net.py`); persistent ones are
+  logged and skipped without aborting the run.
+
+## Backup & disaster recovery
+- **Backup:** the price history (`data/flightguru.db`) is committed to git every
+  run, so its full change history lives in the repo — every clone is a backup.
+- **Rebuild from scratch:** clone repo, set the Actions secrets, run `monitor`.
+- The retired v1 remains in `archive/v1-powershell/` as a fallback.

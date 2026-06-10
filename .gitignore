@@ -1,3 +1,25 @@
+# --- Secrets & local config (NEVER commit these) ---
+.env
 config.json
 state.json
-logs/*.csv
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# --- Logs ---
+**/logs/*.csv
+**/logs/*.log
+
+# --- OS noise ---
+Thumbs.db
+.DS_Store
+
+# NOTE: data/flightguru.db is intentionally NOT ignored.
+# It holds the price history and is committed back by the monitor workflow.

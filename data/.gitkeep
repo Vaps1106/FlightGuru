@@ -1,0 +1,2 @@
+# Keeps the data/ folder in git. The SQLite price history (flightguru.db)
+# will be created here from Phase 3 and committed back by the monitor workflow.

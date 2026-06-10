@@ -1,0 +1,6 @@
+{
+  "enabled": true,
+  "active_from": "2026-06-10",
+  "active_until": "2026-08-14",
+  "_help": "enabled=false pauses immediately. active_from/active_until (YYYY-MM-DD, UTC) auto-start and auto-stop monitoring. Leave a date empty (\"\") to remove that bound. Edit this file and push to apply in the cloud."
+}

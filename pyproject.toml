@@ -1,0 +1,5 @@
+[tool.pytest.ini_options]
+# Make the "src" folder importable so tests can do "import flightguru".
+pythonpath = ["src"]
+addopts = "-q"
+testpaths = ["tests"]
