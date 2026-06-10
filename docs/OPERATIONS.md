@@ -1,7 +1,7 @@
 # OPERATIONS.md
 
 ## Run a check now
-GitHub → **Actions** tab → **monitor** → **Run workflow**.
+GitHub → **Actions** tab → **flightguru** → **Run workflow**.
 Or locally: `python -m flightguru.main`.
 
 ## Pause / resume / set active window (control usage)
@@ -16,18 +16,18 @@ Example — paused:
 ```json
 { "enabled": false, "active_from": "2026-06-10", "active_until": "2026-08-14" }
 ```
-(You can also fully stop the schedule via GitHub → Actions → monitor → "…" → Disable workflow.)
+(You can also fully stop the schedule via GitHub → Actions → flightguru → "…" → Disable workflow.)
 
 ## See history
 Open `data/flightguru.db` (any SQLite viewer), or review the commit history of
 that file in the repo.
 
 ## Common issues
-- **No alerts arriving:** check the latest `monitor` run logs in the Actions tab;
+- **No alerts arriving:** check the latest `flightguru` run logs in the Actions tab;
   confirm the four secrets are set; confirm the Telegram chat ID is correct.
 - **"Missing required environment variable":** a secret/`.env` value is unset.
-- **Nothing happens:** the monitor is manual-only — it only runs when you trigger
-  it (GitHub app, `gh workflow run monitor.yml`, a phone Shortcut, or the Claude
+- **Nothing happens:** the flightguru workflow is manual-only — it only runs when you trigger
+  it (GitHub app, `gh workflow run flightguru.yml`, a phone Shortcut, or the Claude
   GitHub connector). There is no automatic schedule by design.
 - **Amadeus errors:** verify keys, and that `AMADEUS_ENV` matches the keys' tier
   (test vs production).
@@ -38,7 +38,7 @@ a provider is configured and that the Telegram bot is reachable. Exit code 0 = O
 
 ## Monitoring
 - Every run sends a Telegram message — that doubles as a heartbeat: if messages
-  stop arriving, something is wrong, check the latest `monitor` run logs.
+  stop arriving, something is wrong, check the latest `flightguru` run logs.
 - Local runs also write a timestamped, rotating log to `logs/flightguru.log`.
 - Transient API failures auto-retry with backoff (`net.py`); persistent ones are
   logged and skipped without aborting the run.
@@ -46,5 +46,5 @@ a provider is configured and that the Telegram bot is reachable. Exit code 0 = O
 ## Backup & disaster recovery
 - **Backup:** the price history (`data/flightguru.db`) is committed to git every
   run, so its full change history lives in the repo — every clone is a backup.
-- **Rebuild from scratch:** clone repo, set the Actions secrets, run `monitor`.
+- **Rebuild from scratch:** clone repo, set the Actions secrets, run `flightguru`.
 - The retired v1 remains in `archive/v1-powershell/` as a fallback.

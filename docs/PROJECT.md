@@ -43,7 +43,7 @@ Structured logs in each Actions run + a price-history file. Heavy dashboards
 (Prometheus/Grafana) deferred as overkill for a personal monitor.
 
 ## Deployment strategy
-GitHub Actions scheduled workflow (`monitor.yml`), every 8 hours, free.
+GitHub Actions workflow (`flightguru.yml`), manual-only (run on demand), free.
 See [DEPLOYMENT.md](DEPLOYMENT.md).
 
 ## Risks
