@@ -60,3 +60,28 @@ avoid the bug entirely by not using HTML.
 **Why:** Lets the owner pause/resume and auto-stop after the trip to control
 usage/cost, without code changes or deleting the schedule. Works identically
 locally and in GitHub Actions because the file is committed to the repo.
+
+## D11 — Search concurrency (default 4 workers)
+**Decision:** Searches run in parallel via a thread pool, sized by the
+`SEARCH_WORKERS` knob, which defaults to `4`. Set it to `1` for the old
+sequential behaviour, or lower it if a provider rate-limits you. The shared HTTP
+`requests.Session` is safe to use across these threads because we never mutate
+session state — every call passes its own headers/params and urllib3's
+connection pool is itself thread-safe.
+**Why:** A full date-range run is dominated by sequential network round-trips;
+parallelism is the single biggest wall-clock win (≈10s → ≈3s at 4 workers in a
+simulated run). `4` is a modest default that stays comfortably within the free
+provider tiers while delivering most of the speedup. Concurrency cannot change
+*which* fare wins: `normalize()` sorts purely by price, so result ordering is
+irrelevant; the count of offers is identical to sequential.
+**Trade-off / known limitation:** Higher worker counts make more requests in a
+short window, which a rate-limited provider (notably SerpApi's small free quota)
+may answer with HTTP 429. We mitigate per request — 429-aware backoff that
+honours a numeric `Retry-After` — but there is **no global throttle**, so under
+heavy concurrency several threads can back off and retry around the same time.
+Keep `SEARCH_WORKERS` modest (≈4) for the free tiers; raise only if a provider
+tolerates it. The HTTP-date form of `Retry-After` is not parsed (rare for these
+providers); it degrades to exponential backoff.
+**Rejected:** A high default worker count (risks the free quotas); a global
+token-bucket throttle (more machinery than a one-route monitor needs at 4
+workers); async/aiohttp (larger rewrite, no real gain at this scale).

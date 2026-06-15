@@ -2,6 +2,30 @@
 
 All notable changes to FlightGuru. Newest first.
 
+## [2.1.0] — Search performance & resilience (2026-06-15)
+- **Parallel search** (`search.py`): provider/date searches now run concurrently
+  via a thread pool, controlled by the new `SEARCH_WORKERS` setting (default `4`),
+  cutting a full run from tens of seconds to a few. Set `SEARCH_WORKERS=1` for the
+  old sequential behaviour, or lower it if a provider rate-limits you. Result
+  order is preserved and per-`(provider, date)` error isolation is unchanged, so
+  concurrency never changes which fare is chosen (verified by
+  `test_search_all_sequential_and_parallel_match`).
+- **Connection reuse** (`net.py`): all HTTP now goes through one shared
+  `requests.Session`, reusing TCP/TLS connections across the many same-host calls
+  in a run instead of re-handshaking each time.
+- **Rate-limit politeness** (`net.py`): a numeric `Retry-After` header on an HTTP
+  429 is now honoured (we wait at least that long) instead of only guessing with
+  exponential backoff. Reduces dropped dates. (HTTP-date form of `Retry-After`
+  is not parsed; it falls back to exponential backoff — see DECISIONS D11.)
+- **Leaner DB writes** (`storage.py`): snapshot/alert writes use a single
+  connection (schema + insert in one transaction) instead of opening a second
+  connection per write.
+- **No wasted quota** (`search.py`): `evenly_sample` de-duplicates its sampled
+  dates so a scarce SerpApi call is never spent re-checking a date.
+- Tests: added parallel-vs-sequential equivalence, error isolation, sample
+  de-dup, and Retry-After coverage (39 → 43 passing).
+- See DECISIONS D11 for the concurrency trade-off and known limitations.
+
 ## [2.0.0] — Production release (2026-06-10)
 - v2 Python rebuild complete: Phases 0–6. Multi-provider verified-price monitor
   (SerpApi live; Duffel ready for a live token), SQLite history, Telegram alerts,

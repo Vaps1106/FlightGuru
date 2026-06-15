@@ -17,7 +17,10 @@ RETRYABLE_STATUS = {429, 500, 502, 503, 504}
 
 # One shared Session so repeated calls to the same host (e.g. the many Duffel
 # date searches in one run) reuse the underlying TCP/TLS connection instead of
-# doing a fresh handshake every time. Thread-safe for our read-mostly usage.
+# doing a fresh handshake every time. Safe to share across the search threads
+# because we never mutate session state (no session.headers/cookies) — every
+# call passes its own headers/params, and urllib3's connection pool underneath
+# is itself thread-safe.
 _session = requests.Session()
 
 
