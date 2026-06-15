@@ -15,6 +15,22 @@ from .log import get_logger
 
 RETRYABLE_STATUS = {429, 500, 502, 503, 504}
 
+# One shared Session so repeated calls to the same host (e.g. the many Duffel
+# date searches in one run) reuse the underlying TCP/TLS connection instead of
+# doing a fresh handshake every time. Thread-safe for our read-mostly usage.
+_session = requests.Session()
+
+
+def _retry_after_seconds(exc: Exception) -> float | None:
+    """If a 429 response carries a numeric Retry-After header, return it."""
+    resp = getattr(exc, "response", None)
+    if resp is None or getattr(resp, "status_code", None) != 429:
+        return None
+    value = getattr(resp, "headers", {}).get("Retry-After")
+    if value and str(value).strip().isdigit():
+        return float(value)
+    return None
+
 
 def request_json(
     method: str,
@@ -33,7 +49,7 @@ def request_json(
     last_exc: Exception | None = None
     for attempt in range(1, retries + 1):
         try:
-            resp = requests.request(method, url, timeout=timeout, **kwargs)
+            resp = _session.request(method, url, timeout=timeout, **kwargs)
             if resp.status_code in RETRYABLE_STATUS:
                 raise requests.HTTPError(f"{resp.status_code} {resp.reason}", response=resp)
             resp.raise_for_status()
@@ -41,9 +57,12 @@ def request_json(
         except requests.RequestException as exc:
             last_exc = exc
             if attempt < retries:
-                wait = backoff ** attempt
+                # Default to exponential backoff, but honor a server-provided
+                # Retry-After on 429 — wait exactly as long as we're asked.
+                wait = max(backoff ** attempt, _retry_after_seconds(exc) or 0.0)
                 log.warning(
-                    f"request failed ({exc}); retry {attempt}/{retries - 1} in {wait:.1f}s"
+                    f"request failed ({exc}); "
+                    f"retry {attempt} of {retries - 1} in {wait:.1f}s"
                 )
                 time.sleep(wait)
     assert last_exc is not None

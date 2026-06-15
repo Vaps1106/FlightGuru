@@ -60,6 +60,7 @@ class Settings:
     target_price: int
     currency: str
     notify_every_run: bool      # True = report every run; False = only on alert/drop
+    search_workers: int = 1     # parallel provider/date searches (1 = sequential)
 
 
 def load_settings() -> Settings:
@@ -86,6 +87,7 @@ def load_settings() -> Settings:
         currency=os.environ.get("CURRENCY", "USD").strip(),
         notify_every_run=os.environ.get("NOTIFY_EVERY_RUN", "true").strip().lower()
         in ("1", "true", "yes", "on"),
+        search_workers=max(1, int(os.environ.get("SEARCH_WORKERS", "1"))),
     )
 
 

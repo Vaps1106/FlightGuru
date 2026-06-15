@@ -77,9 +77,9 @@ def save_snapshot(
     checked_at: str | None = None,
 ) -> None:
     """Append one price snapshot (the cheapest offer for this run)."""
-    init_db(path)
     conn = _connect(path)
     try:
+        conn.executescript(_SCHEMA)  # ensure tables on this same connection
         conn.execute(
             "INSERT INTO price_snapshots (checked_at_utc, source, origin, destination, "
             "depart_date, airline, flight_numbers, base_price, taxes_fees, total_price, "
@@ -138,9 +138,9 @@ def record_alert(
     offer: Offer, currency: str, path: str = DB_PATH, sent_at: str | None = None
 ) -> None:
     """Log that an alert was sent (used in Phase 4 to avoid duplicate alerts)."""
-    init_db(path)
     conn = _connect(path)
     try:
+        conn.executescript(_SCHEMA)  # ensure tables on this same connection
         conn.execute(
             "INSERT INTO alerts_sent (sent_at_utc, depart_date, source, total_price, currency) "
             "VALUES (?,?,?,?,?)",
