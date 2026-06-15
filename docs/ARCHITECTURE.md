@@ -5,7 +5,7 @@ flowchart TD
     SCHED[GitHub Actions cron<br/>every 8h + manual button] --> MAIN[main.py]
 
     subgraph PIPE[flightguru pipeline]
-        SEARCH[search.py<br/>Amadeus offers]
+        SEARCH[search.py<br/>Duffel + SerpApi offers]
         NORM[normalize.py<br/>clean + validate, reject junk]
         LINK[deeplink.py<br/>booking URL or none]
         STORE[storage.py<br/>SQLite history]
@@ -17,14 +17,14 @@ flowchart TD
     DELTA -->|alert warranted| NOTIFY
     DELTA -->|no link / not cheaper| LOG[log only, no alert]
 
-    SEARCH <-->|HTTPS| AMADEUS[(Amadeus API)]
+    SEARCH <-->|HTTPS| PROVIDERS[(Duffel API +<br/>SerpApi / Google Flights)]
     STORE <--> DB[(data/flightguru.db<br/>committed back each run)]
     NOTIFY --> TG[(Telegram)]
 ```
 
 ## Components
 - **main.py** — entry point; runs the steps in order and handles errors.
-- **search.py** — asks Amadeus for fares (Phase 2).
+- **search.py** — queries the flight providers (Duffel + SerpApi) for fares (Phase 2).
 - **normalize.py** — validates and cleans; home of the "never invent data" rule (Phase 2).
 - **deeplink.py** — builds a booking link or returns None (Phase 2).
 - **storage.py** — SQLite read/write (Phase 3).

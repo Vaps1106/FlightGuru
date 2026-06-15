@@ -11,8 +11,8 @@ CI runs the same on every push via `.github/workflows/tests.yml`.
 ## Strategy by phase
 - **Unit tests** (target 90%+ coverage): each pipeline module in isolation,
   using saved sample API responses (no live calls).
-- **Integration tests** (Phase 2+): real Amadeus *test* environment, DB writes,
-  Telegram send to a test chat.
+- **Integration tests** (Phase 2+): real provider calls (Duffel / SerpApi), DB
+  writes, Telegram send to a test chat.
 - **End-to-end** (Phase 3+): full search → store → notify on sample data.
 - **Chaos** (Phase 5): simulate API outages, slow/invalid responses, DB failures.
 - **Regression**: full suite before every release.

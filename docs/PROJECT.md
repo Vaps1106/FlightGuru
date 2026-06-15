@@ -27,9 +27,11 @@ Python 3.12 · requests · SQLite · pytest · GitHub Actions (host + scheduler)
 Telegram. Rationale and rejected alternatives in [DECISIONS.md](DECISIONS.md).
 
 ## APIs
-- **Amadeus Self-Service — Flight Offers Search** (primary): real fares + tax/fee
-  breakdown, free test tier.
-- **Duffel** (later/optional): true bookable offers for stronger deep links.
+- **Duffel — Flight Offers Search** (primary): real, bookable fares with a
+  tax/fee breakdown; searching is free (you only pay on ticketing).
+- **SerpApi — Google Flights** (cross-check): all-in display prices; free tier
+  ~100 searches/month, so `search.py` caps how many dates it samples.
+- Either or both run depending on which keys are configured (`PROVIDERS`).
 
 ## Database schema
 SQLite at `data/flightguru.db`, committed back each run.
@@ -48,7 +50,7 @@ See [DEPLOYMENT.md](DEPLOYMENT.md).
 
 ## Risks
 - Universal "click-to-book" deep links are an industry-hard problem (see DECISIONS D6).
-- Amadeus free-tier quotas/rate limits.
+- Provider free-tier quotas/rate limits (notably SerpApi's ~100 searches/month).
 - **Date-range cost:** the range spans 26 days. Checking each date = up to 26 API
   calls per run. Phase 2 must sample dates or cap calls to stay within the free tier.
 - GitHub cron timing is best-effort (minor delays).

@@ -1,13 +1,14 @@
 # FlightGuru v2
 
-Verified flight-price monitor. Checks real airfare (Amadeus), stores price
-history, and alerts on Telegram when a fare beats the target — running **free**
-on GitHub Actions.
+Verified flight-price monitor. Checks real airfare (Duffel + SerpApi/Google
+Flights), stores price history, and alerts on Telegram when a fare beats the
+target — running **free** on GitHub Actions.
 
 > Route: **BOM → JFK**, target **< $700 USD**, departing **2026-07-20 → 2026-08-14**.
 
-**Status:** Phase 1 (Project Foundation) complete. Flight search arrives in Phase 2.
-The previous PowerShell version is retired under [`archive/v1-powershell/`](archive/v1-powershell/).
+**Status:** v2 production release — full pipeline live (multi-provider search,
+SQLite history, Telegram alerts, retries/logging/health). The previous PowerShell
+version is retired under [`archive/v1-powershell/`](archive/v1-powershell/).
 
 ## How it works
 
@@ -41,19 +42,26 @@ archive/             retired v1 (PowerShell)
 5. Run the tests: `pytest`
 6. Run the foundation: `python -m flightguru.main`
 
-## Getting Amadeus keys (free)
+## Getting provider keys (free)
 
-1. Go to https://developers.amadeus.com and register a free account; confirm your email.
-2. Sign in → **My Self-Service Workspace** → **Create new app**.
-3. Copy the generated **API Key** and **API Secret**.
-4. Put them in `.env` as `AMADEUS_CLIENT_ID` and `AMADEUS_CLIENT_SECRET`.
-5. Keep `AMADEUS_ENV=test` (free tier) until we're ready for live production data.
+The monitor reads from one or both flight providers — whichever keys you supply
+(see `PROVIDERS` in `.env.example`). Each is free to start.
+
+**Duffel** (real, bookable fares with a tax/fee breakdown):
+1. Sign up at https://app.duffel.com and verify your email.
+2. Create an **access token** under **Developers → Access tokens**.
+3. Put it in `.env` as `DUFFEL_ACCESS_TOKEN` (leave `DUFFEL_VERSION=v2`).
+
+**SerpApi** (Google Flights display prices; free tier ~100 searches/month):
+1. Sign up at https://serpapi.com and confirm your account.
+2. Copy your **API key** from the dashboard.
+3. Put it in `.env` as `SERPAPI_API_KEY`.
 
 ## Secrets
 
 Secrets never live in the code. Locally they sit in `.env` (git-ignored). In the
 cloud they go in **GitHub → Settings → Secrets and variables → Actions**:
-`AMADEUS_CLIENT_ID`, `AMADEUS_CLIENT_SECRET`, `TELEGRAM_BOT_TOKEN`,
+`DUFFEL_ACCESS_TOKEN`, `SERPAPI_API_KEY`, `TELEGRAM_BOT_TOKEN`,
 `TELEGRAM_CHAT_ID`. See [`docs/SECURITY.md`](docs/SECURITY.md).
 
 See [`docs/PROJECT.md`](docs/PROJECT.md) for the full picture.

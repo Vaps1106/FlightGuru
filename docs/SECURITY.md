@@ -4,7 +4,7 @@
 - Secrets never live in code or in git.
 - **Locally:** in `.env` (git-ignored). `.env.example` documents the names only.
 - **In CI:** GitHub → Settings → Secrets and variables → Actions:
-  `AMADEUS_CLIENT_ID`, `AMADEUS_CLIENT_SECRET`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`.
+  `DUFFEL_ACCESS_TOKEN`, `SERPAPI_API_KEY`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`.
 
 ## Action required — rotate v1 keys
 The v1 SerpApi key and Telegram bot token were exposed during development. Rotate them:

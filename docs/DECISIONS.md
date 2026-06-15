@@ -24,12 +24,18 @@ GitHub's 60-day cron-disable timer automatically.
 `requirements.txt`. Docker would add complexity for no benefit here.
 **Revisit if:** we ever move off GitHub Actions to a different host.
 
-## D5 — Amadeus as primary price source
-**Decision:** Use Amadeus Self-Service Flight Offers Search.
-**Why:** Real bookable fares with tax/fee breakdown and a verified timestamp;
-free test tier. Directly fixes v1's inaccurate scraped prices.
-**Rejected:** SerpApi (scrapes Google Flights — display prices only),
-TravelPayouts (cached/inaccurate, confirmed in v1).
+## D5 — Duffel + SerpApi as price sources
+**Decision:** Use **Duffel** (Flight Offers Search) as the primary source and
+**SerpApi** (Google Flights) as a cross-check. Either or both run depending on
+which keys are configured.
+**Why:** Duffel returns real, bookable fares with a tax/fee breakdown — free to
+search, fixing v1's inaccurate scraped prices — and SerpApi adds an independent
+all-in display price for sanity-checking. SerpApi's small free quota is the
+reason `search.py` caps how many dates it samples.
+**History:** Amadeus Self-Service was the original Phase-0 plan, but during
+Phase 2 we switched to Duffel for stronger, directly-bookable offers (and added
+SerpApi as the cross-check). TravelPayouts was rejected (cached/inaccurate,
+confirmed in v1).
 
 ## D6 — Kayak deterministic deep links as the practical default
 **Decision:** Generate Kayak URLs (`kayak.com/flights/ORIGIN-DEST/DATE`) that

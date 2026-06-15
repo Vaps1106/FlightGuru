@@ -29,8 +29,9 @@ that file in the repo.
 - **Nothing happens:** the flightguru workflow is manual-only — it only runs when you trigger
   it (GitHub app, `gh workflow run flightguru.yml`, a phone Shortcut, or the Claude
   GitHub connector). There is no automatic schedule by design.
-- **Amadeus errors:** verify keys, and that `AMADEUS_ENV` matches the keys' tier
-  (test vs production).
+- **Provider errors:** verify the relevant key is set (`DUFFEL_ACCESS_TOKEN` /
+  `SERPAPI_API_KEY`) and not a placeholder; SerpApi's free tier is ~100
+  searches/month, so a 429 may mean the monthly quota is spent.
 
 ## Health check
 Run `python -m flightguru.main --health` (or trigger it in Actions). It verifies
