@@ -42,6 +42,7 @@ jobs:
           SEARCH_START_DATE: "2026-07-20"
           SEARCH_END_DATE: "2026-08-14"
           SEARCH_DATE_STEP: "1"
+          SEARCH_MAX_WORKERS: "6"
           TARGET_PRICE: "700"
           CURRENCY: USD
         run: python -m flightguru.main
