@@ -20,6 +20,7 @@ def _settings(**overrides) -> Settings:
         search_start_date="2026-07-20",
         search_end_date="2026-08-14",
         search_date_step=1,
+        search_max_workers=6,
         serpapi_max_dates=8,
         target_price=700,
         currency="USD",

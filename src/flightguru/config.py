@@ -56,6 +56,7 @@ class Settings:
     search_start_date: str      # earliest departure date to check (YYYY-MM-DD)
     search_end_date: str        # latest departure date to check (YYYY-MM-DD)
     search_date_step: int       # days between dates checked (1 = every day)
+    search_max_workers: int     # how many provider requests to run at once (bounded)
     serpapi_max_dates: int      # cap SerpApi to N dates/run (protects its free quota)
     target_price: int
     currency: str
@@ -81,6 +82,7 @@ def load_settings() -> Settings:
         search_start_date=os.environ.get("SEARCH_START_DATE", "2026-07-20").strip(),
         search_end_date=os.environ.get("SEARCH_END_DATE", "2026-08-14").strip(),
         search_date_step=int(os.environ.get("SEARCH_DATE_STEP", "1")),
+        search_max_workers=int(os.environ.get("SEARCH_MAX_WORKERS", "6")),
         serpapi_max_dates=int(os.environ.get("SERPAPI_MAX_DATES", "8")),
         target_price=int(os.environ.get("TARGET_PRICE", "700")),
         currency=os.environ.get("CURRENCY", "USD").strip(),

@@ -78,5 +78,9 @@ def normalize(offers: list[Offer]) -> list[Offer]:
             continue
         seen.add(key)
         result.append(offer)
-    result.sort(key=lambda o: o.total_price)
+    # Cheapest first; the extra keys break price ties deterministically so the
+    # same offers always pick the same "cheapest" winner, run to run.
+    result.sort(
+        key=lambda o: (o.total_price, o.search_date, o.source, o.flight_numbers)
+    )
     return result
