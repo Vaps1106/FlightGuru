@@ -106,17 +106,24 @@ def main() -> int:
     if link is None:
         log.info("  Telegram: suppressed - no booking link could be built.")
         return 0
-    if settings.notify_every_run or decision.alert or decision.dropped:
+    last_alert = storage.last_alert_price(cheapest.search_date)
+    send_alert = delta.should_send_alert(decision, cheapest.total_price, last_alert)
+    if decision.alert and not send_alert:
+        log.info(
+            f"  Alert: suppressed - already alerted this fare at "
+            f"{settings.currency} {last_alert:.0f} and it is not lower now."
+        )
+    if settings.notify_every_run or send_alert or decision.dropped:
         message = notify.build_message(settings, cheapest, decision, link, now)
         try:
             ok = notify.send_telegram(settings, message)
             log.info(f"  Telegram: {'sent' if ok else 'not sent (API said not ok)'}")
-            if ok and decision.alert:
+            if ok and send_alert:
                 storage.record_alert(cheapest, settings.currency)
         except Exception as exc:  # noqa: BLE001 - report, don't crash the run
             log.error(f"  Telegram: failed - {exc}")
     else:
-        log.info("  Telegram: skipped (no alert; NOTIFY_EVERY_RUN is off).")
+        log.info("  Telegram: skipped (no new alert; NOTIFY_EVERY_RUN is off).")
     return 0
 
 

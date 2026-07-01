@@ -28,3 +28,20 @@ def decide(total_price: float, last_price: float | None, target_price: float) ->
         drop_amount=drop_amount,
         alert=below_target,
     )
+
+
+def should_send_alert(
+    decision: Decision, total_price: float, last_alert_price: float | None
+) -> bool:
+    """Whether a below-target price is worth a fresh alert.
+
+    Send when the fare is below target and either we have never alerted for it
+    before, or the price is now lower than the last alerted price. This stops the
+    same below-target fare from re-alerting on every run while still notifying
+    when it gets cheaper.
+    """
+    if not decision.alert:
+        return False
+    if last_alert_price is None:
+        return True
+    return total_price < last_alert_price
