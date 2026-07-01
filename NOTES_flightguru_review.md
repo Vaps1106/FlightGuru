@@ -41,12 +41,17 @@ explicit 429/503; (b) pass `retries=1` for Telegram; (c) leave it (duplicates ar
 harmless-ish). I left it because retrying a transient Telegram 5xx is usually what you want
 — your call on the trade-off.
 
-### B. `alerts_sent` table is written but never read  — INCOMPLETE FEATURE
-`storage.record_alert()` logs every below-target alert, and the docstring says it's "used
-in Phase 4 to avoid duplicate alerts" — but nothing queries it. So when the price sits
-below target, **every run (every 8h) fires another BELOW TARGET alert**. If you want
-"alert once per price level / once per day," this is where to add a suppression check
-(e.g. skip if an alert for the same depart_date+price was sent in the last N hours).
+### B. `alerts_sent` table is written but never read  — FIXED (2026-07-01)
+Wired up in the alert-dedup change: `storage.last_alert_price()` + pure
+`delta.should_send_alert()`. A below-target fare now alerts once and re-alerts only when
+the price drops below the last alerted price for that date. Heartbeat mode unchanged.
+
+### G. Cross-currency prices compared as equal  — FIXED (2026-07-01)
+`normalize()` sorted/compared `total_price` across offers regardless of currency, so a
+Duffel fare priced in the account currency (e.g. GBP) could win over a USD fare and skew
+the below-target check. Latent today (SerpApi is USD-only) but real once Duffel is enabled.
+Fixed with `normalize(offers, prefer_currency=...)`; `main.py` passes `settings.currency`
+and logs a hint if everything is filtered out by currency.
 
 ### C. Duffel searches all 26 dates every run  — OPTIMIZATION
 SerpApi is capped (`serpapi_max_dates`), but Duffel hits every date in the range each run.
