@@ -14,6 +14,25 @@ import requests
 from .log import get_logger
 
 RETRYABLE_STATUS = {429, 500, 502, 503, 504}
+RETRY_AFTER_CAP = 60.0  # never wait longer than this on a Retry-After header
+
+
+def _retry_after_seconds(exc: Exception) -> float | None:
+    """Seconds to wait per a response's ``Retry-After`` header, if present.
+
+    Providers (SerpApi, Telegram, Duffel) return this on a 429/503 to say exactly
+    how long to back off. Honor the numeric-seconds form, capped so one run can't
+    hang; ignore the HTTP-date form and fall back to exponential backoff.
+    """
+    resp = getattr(exc, "response", None)
+    headers = getattr(resp, "headers", None) or {}
+    raw = headers.get("Retry-After")
+    if not raw:
+        return None
+    try:
+        return min(float(raw), RETRY_AFTER_CAP)
+    except (TypeError, ValueError):
+        return None
 
 
 def request_json(
@@ -41,7 +60,7 @@ def request_json(
         except requests.RequestException as exc:
             last_exc = exc
             if attempt < retries:
-                wait = backoff ** attempt
+                wait = _retry_after_seconds(exc) or backoff ** attempt
                 log.warning(
                     f"request failed ({exc}); retry {attempt}/{retries - 1} in {wait:.1f}s"
                 )
