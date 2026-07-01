@@ -134,6 +134,26 @@ def count_snapshots(path: str = DB_PATH) -> int:
         conn.close()
 
 
+def last_alert_price(depart_date: str, path: str = DB_PATH) -> float | None:
+    """Total price of the most recent alert sent for this depart_date.
+
+    Returns None if no alert has been sent for that date yet. Used to suppress
+    repeat alerts for the same fare when the price has not dropped further.
+    """
+    if not os.path.exists(path):
+        return None
+    conn = _connect(path)
+    try:
+        row = conn.execute(
+            "SELECT total_price FROM alerts_sent WHERE depart_date = ? "
+            "ORDER BY id DESC LIMIT 1",
+            (depart_date,),
+        ).fetchone()
+        return row[0] if row else None
+    finally:
+        conn.close()
+
+
 def record_alert(
     offer: Offer, currency: str, path: str = DB_PATH, sent_at: str | None = None
 ) -> None:

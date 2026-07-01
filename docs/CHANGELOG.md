@@ -2,6 +2,16 @@
 
 All notable changes to FlightGuru. Newest first.
 
+## [Unreleased] — Alert de-duplication (2026-07-01)
+- Wired up the `alerts_sent` table, which was written but never read. A
+  below-target fare now alerts once and re-alerts only when the price drops below
+  the last alerted price for that date, instead of alerting on every run.
+- Added `storage.last_alert_price(depart_date)` and pure
+  `delta.should_send_alert(decision, total_price, last_alert_price)`; `main.py`
+  records an alert only when it is a fresh one. The every-run heartbeat
+  (`NOTIFY_EVERY_RUN=true`) is unchanged.
+- Tests: +6 (`test_delta.py`, `test_storage.py`).
+
 ## [2.0.0] — Production release (2026-06-10)
 - v2 Python rebuild complete: Phases 0–6. Multi-provider verified-price monitor
   (SerpApi live; Duffel ready for a live token), SQLite history, Telegram alerts,
