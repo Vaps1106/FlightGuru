@@ -29,6 +29,22 @@ def fmt_minutes(total) -> str:
     return f"{total // 60}h {total % 60}m"
 
 
+def fmt_time(value: str) -> str:
+    """ISO datetime -> 'YYYY-MM-DD HH:MM' for clean display.
+
+    Duffel returns full ISO timestamps (``2026-07-20T02:15:00-04:00``); SerpApi
+    already returns ``2026-07-20 08:00``. Normalizing here keeps both providers'
+    depart/arrive times consistent in the log and Telegram message. Anything that
+    isn't ISO is passed through unchanged.
+    """
+    if not value:
+        return ""
+    try:
+        return datetime.fromisoformat(value).strftime("%Y-%m-%d %H:%M")
+    except (TypeError, ValueError):
+        return value
+
+
 def iso_duration_to_minutes(iso: str) -> int:
     """ISO-8601 duration 'PT20H55M' -> 1255 minutes."""
     if not iso:

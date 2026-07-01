@@ -9,7 +9,7 @@ from __future__ import annotations
 from .. import net
 from ..config import Settings
 from ..models import Offer
-from ..normalize import fmt_iso_duration, fmt_minutes, minutes_between, to_float
+from ..normalize import fmt_iso_duration, fmt_minutes, fmt_time, minutes_between, to_float
 
 BASE_URL = "https://api.duffel.com"
 
@@ -91,8 +91,8 @@ def parse_duffel(response_json: dict, dep_date: str) -> list[Offer]:
                 search_date=dep_date,
                 airline=airline,
                 flight_numbers=flight_numbers,
-                depart_time=first.get("departing_at") or "",
-                arrive_time=last.get("arriving_at") or "",
+                depart_time=fmt_time(first.get("departing_at") or ""),
+                arrive_time=fmt_time(last.get("arriving_at") or ""),
                 duration=fmt_iso_duration(slices[0].get("duration", "")),
                 stops=len(segs) - 1,
                 layovers=layovers,

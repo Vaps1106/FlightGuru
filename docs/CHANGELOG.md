@@ -2,15 +2,23 @@
 
 All notable changes to FlightGuru. Newest first.
 
-## [Unreleased] — Alert de-duplication (2026-07-01)
+## [Unreleased] — Review pass (2026-07-01)
 - Wired up the `alerts_sent` table, which was written but never read. A
   below-target fare now alerts once and re-alerts only when the price drops below
-  the last alerted price for that date, instead of alerting on every run.
-- Added `storage.last_alert_price(depart_date)` and pure
-  `delta.should_send_alert(decision, total_price, last_alert_price)`; `main.py`
-  records an alert only when it is a fresh one. The every-run heartbeat
-  (`NOTIFY_EVERY_RUN=true`) is unchanged.
-- Tests: +6 (`test_delta.py`, `test_storage.py`).
+  the last alerted price for that date, instead of alerting on every run. Added
+  `storage.last_alert_price(depart_date)` and pure `delta.should_send_alert()`;
+  the every-run heartbeat (`NOTIFY_EVERY_RUN=true`) is unchanged.
+- Fixed: Duffel depart/arrive times were shown as raw ISO timestamps in the log and
+  Telegram message; added `normalize.fmt_time()` so both providers display clean
+  `YYYY-MM-DD HH:MM`.
+- Fixed: `net.py` now honors the `Retry-After` header on 429/503 (capped at 60s) instead
+  of always using fixed exponential backoff.
+- Fixed: `load_settings()` no longer crashes on a non-numeric env var (e.g. a typo in
+  `TARGET_PRICE`); `_int_env()` falls back to the default.
+- Tests: +12 across `test_delta`, `test_storage`, `test_net`, `test_normalize`,
+  `test_foundation`; 45 → 57 passing.
+- See `NOTES_flightguru_review.md` for remaining flagged items (duplicate-alert risk on
+  Telegram retry, Duffel date-cap optimization).
 
 ## [2.0.0] — Production release (2026-06-10)
 - v2 Python rebuild complete: Phases 0–6. Multi-provider verified-price monitor

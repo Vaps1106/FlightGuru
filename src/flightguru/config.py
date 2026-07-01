@@ -33,6 +33,21 @@ def _require(name: str) -> str:
     return value
 
 
+def _int_env(name: str, default: int) -> int:
+    """Read an int env var, falling back to ``default`` if unset or non-numeric.
+
+    Keeps a stray typo (e.g. ``TARGET_PRICE=7O0``) from crashing the whole run
+    with an uncaught ValueError that ``main.py`` doesn't catch.
+    """
+    raw = os.environ.get(name, "").strip()
+    if not raw:
+        return default
+    try:
+        return int(raw)
+    except ValueError:
+        return default
+
+
 def _looks_placeholder(value: str) -> bool:
     """True if a key is empty or still the .env.example placeholder text."""
     v = (value or "").upper()
@@ -81,10 +96,10 @@ def load_settings() -> Settings:
         destination=os.environ.get("DESTINATION", "JFK").strip(),
         search_start_date=os.environ.get("SEARCH_START_DATE", "2026-07-20").strip(),
         search_end_date=os.environ.get("SEARCH_END_DATE", "2026-08-14").strip(),
-        search_date_step=int(os.environ.get("SEARCH_DATE_STEP", "1")),
-        search_max_workers=int(os.environ.get("SEARCH_MAX_WORKERS", "6")),
-        serpapi_max_dates=int(os.environ.get("SERPAPI_MAX_DATES", "8")),
-        target_price=int(os.environ.get("TARGET_PRICE", "700")),
+        search_date_step=_int_env("SEARCH_DATE_STEP", 1),
+        search_max_workers=_int_env("SEARCH_MAX_WORKERS", 6),
+        serpapi_max_dates=_int_env("SERPAPI_MAX_DATES", 8),
+        target_price=_int_env("TARGET_PRICE", 700),
         currency=os.environ.get("CURRENCY", "USD").strip(),
         notify_every_run=os.environ.get("NOTIFY_EVERY_RUN", "true").strip().lower()
         in ("1", "true", "yes", "on"),
