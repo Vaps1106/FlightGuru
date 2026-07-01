@@ -2,6 +2,16 @@
 
 All notable changes to FlightGuru. Newest first.
 
+## [Unreleased] — Currency guard (2026-07-01)
+- `normalize()` now takes an optional `prefer_currency`. `main.py` passes
+  `settings.currency`, so offers priced in another currency are excluded from the
+  cheapest pick and the below-target check instead of being compared as if equal.
+  This is latent today (SerpApi prices in USD) but would break the pick once
+  Duffel is enabled, since Duffel prices in the account currency. Default of None
+  keeps all currencies, so nothing changes for single-currency runs.
+- `main.py` logs a clear hint when every offer is filtered out by currency.
+- Tests: +2 (`test_normalize.py`).
+
 ## [Unreleased] — Review pass (2026-07-01)
 - Wired up the `alerts_sent` table, which was written but never read. A
   below-target fare now alerts once and re-alerts only when the price drops below

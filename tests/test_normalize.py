@@ -74,3 +74,18 @@ def test_drops_invalid_keeps_valid():
     out = normalize([mk(0, flight_numbers="Z"), mk(690, flight_numbers="Y")])
     assert len(out) == 1
     assert out[0].total_price == 690
+
+
+def test_prefer_currency_excludes_other_currencies():
+    usd = mk(600, flight_numbers="U", currency="USD")
+    gbp = mk(300, flight_numbers="G", currency="GBP")  # cheaper number, wrong currency
+    out = normalize([usd, gbp], prefer_currency="USD")
+    assert [o.currency for o in out] == ["USD"]         # GBP excluded, not picked
+    assert out[0].total_price == 600
+
+
+def test_prefer_currency_none_keeps_all():
+    usd = mk(600, flight_numbers="U", currency="USD")
+    gbp = mk(300, flight_numbers="G", currency="GBP")
+    out = normalize([usd, gbp])                          # default: no filtering
+    assert {o.currency for o in out} == {"USD", "GBP"}

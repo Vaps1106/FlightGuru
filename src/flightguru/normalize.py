@@ -82,12 +82,22 @@ def is_valid(offer: Offer) -> bool:
     )
 
 
-def normalize(offers: list[Offer]) -> list[Offer]:
-    """Drop invalid offers, de-duplicate, and sort cheapest-first."""
+def normalize(offers: list[Offer], prefer_currency: str | None = None) -> list[Offer]:
+    """Drop invalid offers, de-duplicate, and sort cheapest-first.
+
+    When ``prefer_currency`` is given, offers in any other currency are excluded.
+    Prices in different currencies are not comparable, so mixing them would make
+    the cheapest pick and the below-target check meaningless (a real risk once
+    Duffel is enabled, since it prices in the account currency). Default of None
+    keeps every currency, so existing single-currency callers are unaffected.
+    """
+    want = (prefer_currency or "").strip().upper()
     seen: set[tuple] = set()
     result: list[Offer] = []
     for offer in offers:
         if not is_valid(offer):
+            continue
+        if want and offer.currency.strip().upper() != want:
             continue
         key = (offer.airline, offer.flight_numbers, offer.search_date, round(offer.total_price, 2))
         if key in seen:

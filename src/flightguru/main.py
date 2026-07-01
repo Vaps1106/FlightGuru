@@ -59,12 +59,19 @@ def main() -> int:
     raw = search_mod.search_all(
         settings, on_error=lambda p, d, e: errors.append(f"{p} {d}: {e}")
     )
-    offers = normalize(raw)
+    offers = normalize(raw, prefer_currency=settings.currency)
     for warn in errors[:5]:
         log.warning(f"  warn: {warn}")
 
     if not offers:
-        log.info("No verified offers found in range.")
+        other = {o.currency for o in raw if o.currency and o.currency.upper() != settings.currency.upper()}
+        if other:
+            log.info(
+                f"No verified offers in {settings.currency}; a provider priced in "
+                f"{', '.join(sorted(other))}. Set CURRENCY to match to use those."
+            )
+        else:
+            log.info("No verified offers found in range.")
         return 0
 
     # 4) Pick the cheapest, compare to history, record it.
