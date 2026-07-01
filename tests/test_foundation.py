@@ -5,7 +5,16 @@ from __future__ import annotations
 from flightguru import __version__
 from flightguru import main as main_mod
 from flightguru import search as search_mod
-from flightguru.config import enabled_providers
+from flightguru.config import _int_env, enabled_providers
+
+
+def test_int_env_defaults_and_bad_values(monkeypatch):
+    monkeypatch.delenv("FG_TEST_INT", raising=False)
+    assert _int_env("FG_TEST_INT", 5) == 5          # unset -> default
+    monkeypatch.setenv("FG_TEST_INT", "12")
+    assert _int_env("FG_TEST_INT", 5) == 12         # numeric -> parsed
+    monkeypatch.setenv("FG_TEST_INT", "7O0")        # typo (letter O) -> default
+    assert _int_env("FG_TEST_INT", 5) == 5
 
 
 def test_package_has_version():

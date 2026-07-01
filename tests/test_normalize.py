@@ -3,7 +3,20 @@
 from __future__ import annotations
 
 from flightguru.models import Offer
-from flightguru.normalize import is_valid, normalize
+from flightguru.normalize import fmt_time, is_valid, normalize
+
+
+def test_fmt_time_iso_to_clean():
+    assert fmt_time("2026-07-20T02:15:00") == "2026-07-20 02:15"
+
+
+def test_fmt_time_iso_with_offset():
+    assert fmt_time("2026-07-20T02:15:00-04:00") == "2026-07-20 02:15"
+
+
+def test_fmt_time_passthrough_and_empty():
+    assert fmt_time("2026-07-20 08:00") == "2026-07-20 08:00"  # already clean
+    assert fmt_time("") == ""
 
 
 def mk(total, **overrides) -> Offer:

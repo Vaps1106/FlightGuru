@@ -2,6 +2,18 @@
 
 All notable changes to FlightGuru. Newest first.
 
+## [Unreleased] — Review pass (2026-07-01)
+- Fixed: Duffel depart/arrive times were shown as raw ISO timestamps in the log and
+  Telegram message; added `normalize.fmt_time()` so both providers display clean
+  `YYYY-MM-DD HH:MM`.
+- Fixed: `net.py` now honors the `Retry-After` header on 429/503 (capped at 60s) instead
+  of always using fixed exponential backoff — matches its "429-aware" intent.
+- Fixed: `load_settings()` no longer crashes on a non-numeric env var (e.g. a typo in
+  `TARGET_PRICE`); `_int_env()` falls back to the default.
+- Tests: +6 (`test_net.py`, `test_normalize.py`, `test_foundation.py`); 45 → 51 passing.
+- See `NOTES_flightguru_review.md` for flagged-but-unchanged items (duplicate-alert risk on
+  Telegram retry, unused `alerts_sent` dedup table, Duffel date-cap optimization).
+
 ## [2.0.0] — Production release (2026-06-10)
 - v2 Python rebuild complete: Phases 0–6. Multi-provider verified-price monitor
   (SerpApi live; Duffel ready for a live token), SQLite history, Telegram alerts,

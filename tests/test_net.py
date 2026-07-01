@@ -9,9 +9,10 @@ from flightguru import net
 
 
 class FakeResp:
-    def __init__(self, status=200, payload=None):
+    def __init__(self, status=200, payload=None, headers=None):
         self.status_code = status
         self.reason = "reason"
+        self.headers = headers or {}
         self._payload = payload if payload is not None else {"ok": True}
 
     def json(self):
@@ -52,6 +53,38 @@ def test_retries_on_429(monkeypatch):
     monkeypatch.setattr(net.requests, "request", fake_request)
     data = net.request_json("GET", "http://x", retries=3)
     assert data["ok"] and calls["n"] == 2
+
+
+def test_honors_retry_after_header(monkeypatch):
+    slept = []
+    monkeypatch.setattr(net.time, "sleep", lambda s: slept.append(s))
+    calls = {"n": 0}
+
+    def fake_request(method, url, **kwargs):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return FakeResp(429, headers={"Retry-After": "7"})
+        return FakeResp(200, {"ok": True})
+
+    monkeypatch.setattr(net.requests, "request", fake_request)
+    data = net.request_json("GET", "http://x", retries=3, backoff=1.5)
+    assert data["ok"] and slept == [7.0]  # waited exactly what the header said
+
+
+def test_retry_after_is_capped(monkeypatch):
+    slept = []
+    monkeypatch.setattr(net.time, "sleep", lambda s: slept.append(s))
+    calls = {"n": 0}
+
+    def fake_request(method, url, **kwargs):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return FakeResp(503, headers={"Retry-After": "9999"})
+        return FakeResp(200, {"ok": True})
+
+    monkeypatch.setattr(net.requests, "request", fake_request)
+    net.request_json("GET", "http://x", retries=3)
+    assert slept == [net.RETRY_AFTER_CAP]  # capped, won't hang the run
 
 
 def test_raises_after_exhausting_retries(monkeypatch):
