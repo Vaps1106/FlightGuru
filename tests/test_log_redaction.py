@@ -30,8 +30,10 @@ def test_redacts_serpapi_key_in_url():
 
 
 def test_redacts_bearer_token():
-    out = redact("Authorization: Bearer duffel_live_SECRETtoken123")
-    assert "duffel_live_SECRETtoken123" not in out
+    # Fixture is deliberately NOT a real-token shape, so the secret-leak scanner
+    # (scripts/check_secrets.py) doesn't flag this test file.
+    out = redact("Authorization: Bearer testonly_FAKEtoken_value")
+    assert "testonly_FAKEtoken_value" not in out
     assert "Bearer <redacted>" in out
 
 
