@@ -87,6 +87,24 @@ def test_retry_after_is_capped(monkeypatch):
     assert slept == [net.RETRY_AFTER_CAP]  # capped, won't hang the run
 
 
+def test_non_json_body_is_not_retried(monkeypatch):
+    _no_sleep(monkeypatch)
+    calls = {"n": 0}
+
+    class BadJson(FakeResp):
+        def json(self):
+            raise ValueError("Expecting value")
+
+    def fake_request(method, url, **kwargs):
+        calls["n"] += 1
+        return BadJson(200)
+
+    monkeypatch.setattr(net.requests, "request", fake_request)
+    with pytest.raises(requests.RequestException):
+        net.request_json("GET", "http://x", retries=3)
+    assert calls["n"] == 1  # a malformed 200 body fails fast, no wasted retries
+
+
 def test_raises_after_exhausting_retries(monkeypatch):
     _no_sleep(monkeypatch)
 

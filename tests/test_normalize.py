@@ -3,7 +3,20 @@
 from __future__ import annotations
 
 from flightguru.models import Offer
-from flightguru.normalize import fmt_time, is_valid, normalize
+from flightguru.normalize import fmt_time, is_valid, iso_duration_to_minutes, normalize
+
+
+def test_iso_duration_hours_minutes():
+    assert iso_duration_to_minutes("PT20H55M") == 1255
+
+
+def test_iso_duration_includes_days():
+    # >24h itinerary: 'P1DT2H30M' = 1 day + 2h 30m = 1590 min (was undercounted).
+    assert iso_duration_to_minutes("P1DT2H30M") == 1590
+
+
+def test_iso_duration_empty():
+    assert iso_duration_to_minutes("") == 0
 
 
 def test_fmt_time_iso_to_clean():

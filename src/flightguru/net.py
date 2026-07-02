@@ -56,7 +56,6 @@ def request_json(
             if resp.status_code in RETRYABLE_STATUS:
                 raise requests.HTTPError(f"{resp.status_code} {resp.reason}", response=resp)
             resp.raise_for_status()
-            return resp.json()
         except requests.RequestException as exc:
             last_exc = exc
             if attempt < retries:
@@ -65,5 +64,13 @@ def request_json(
                     f"request failed ({exc}); retry {attempt}/{retries - 1} in {wait:.1f}s"
                 )
                 time.sleep(wait)
+            continue
+        # HTTP succeeded. A malformed body is a hard failure — retrying an
+        # identical request won't turn it into valid JSON, so fail immediately.
+        # (No URL in the message, so no secret can leak here.)
+        try:
+            return resp.json()
+        except ValueError as exc:
+            raise requests.RequestException("response body was not valid JSON") from exc
     assert last_exc is not None
     raise last_exc

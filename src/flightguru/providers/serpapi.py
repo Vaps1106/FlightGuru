@@ -32,7 +32,23 @@ def search_serpapi(settings: Settings, dep_date: str) -> list[Offer]:
 
 
 def parse_serpapi(response_json: dict, dep_date: str, currency: str = "USD") -> list[Offer]:
-    """Convert a SerpApi google_flights response into Offers (no validation here)."""
+    """Convert a SerpApi google_flights response into Offers (no validation here).
+
+    SerpApi prices are plain numbers with no per-offer currency, so we stamp the
+    currency SerpApi reports having used (``search_parameters.currency``) rather
+    than blindly assuming the one we requested. If SerpApi ever prices in a
+    different currency than asked, the offer is then labeled with the real
+    currency, and the currency guard in ``normalize()`` filters it out instead of
+    silently comparing, say, EUR against a USD target. ``currency`` is the
+    fallback only for the (rare) case where SerpApi doesn't echo one back.
+
+    Residual limit: SerpApi does not independently confirm the currency of each
+    price, so this reflects SerpApi's own reported currency, not a per-price
+    guarantee. Duffel remains the source with a verified currency + tax breakdown.
+    """
+    reported = ((response_json.get("search_parameters") or {}).get("currency") or "").strip()
+    offer_currency = reported or currency
+
     offers: list[Offer] = []
     raw = (response_json.get("best_flights") or []) + (response_json.get("other_flights") or [])
     for f in raw:
@@ -61,7 +77,7 @@ def parse_serpapi(response_json: dict, dep_date: str, currency: str = "USD") -> 
                 base_price=0.0,
                 taxes_fees=0.0,
                 total_price=to_float(f.get("price")) or 0.0,
-                currency=currency,
+                currency=offer_currency,
             )
         )
     return offers

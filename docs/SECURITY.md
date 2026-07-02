@@ -19,3 +19,7 @@ The v1 SerpApi key and Telegram bot token were exposed during development. Rotat
 - A secret-leak scan (`scripts/check_secrets.py`) runs in CI on every push and
   fails the build if a token-shaped string appears in a tracked file. Run it
   locally any time with `python scripts/check_secrets.py`.
+- **Logs are redacted at the source.** `log.py` runs every record through a
+  redaction filter that strips Telegram bot tokens, `api_key=` query params, and
+  `Bearer` tokens. This protects against `requests` exceptions embedding the
+  request URL (with its secret) in a logged error message.

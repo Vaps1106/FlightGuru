@@ -46,12 +46,22 @@ def fmt_time(value: str) -> str:
 
 
 def iso_duration_to_minutes(iso: str) -> int:
-    """ISO-8601 duration 'PT20H55M' -> 1255 minutes."""
+    """ISO-8601 duration -> minutes. 'PT20H55M' -> 1255; 'P1DT2H' -> 1560.
+
+    Handles the day component too: a multi-leg itinerary longer than 24h comes
+    back as e.g. 'P1DT2H30M', and ignoring the 'D' would undercount it by a full
+    day. (Flight durations never carry years/months, so those aren't parsed.)
+    """
     if not iso:
         return 0
+    d = re.search(r"(\d+)D", iso)
     h = re.search(r"(\d+)H", iso)
     m = re.search(r"(\d+)M", iso)
-    return (int(h.group(1)) if h else 0) * 60 + (int(m.group(1)) if m else 0)
+    return (
+        (int(d.group(1)) if d else 0) * 1440
+        + (int(h.group(1)) if h else 0) * 60
+        + (int(m.group(1)) if m else 0)
+    )
 
 
 def fmt_iso_duration(iso: str) -> str:
