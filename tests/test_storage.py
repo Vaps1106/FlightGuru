@@ -44,6 +44,16 @@ def test_last_price_is_most_recent(tmp_path):
     assert storage.get_last_total_price(db) == 650.0
 
 
+def test_last_price_scoped_by_route(tmp_path):
+    # A different route's snapshot must not be returned for BOM->JFK (M3).
+    db = str(tmp_path / "r.db")
+    storage.save_snapshot(_offer(630), "BOM", "JFK", "l", False, path=db)
+    storage.save_snapshot(_offer(120), "DEL", "LHR", "l", False, path=db)  # newest, other route
+    assert storage.get_last_total_price(db) == 120.0  # unscoped: newest wins
+    assert storage.get_last_total_price(db, origin="BOM", destination="JFK") == 630.0
+    assert storage.get_last_total_price(db, origin="BOM", destination="LAX") is None
+
+
 def test_last_alert_price_none_when_no_alert(tmp_path):
     db = str(tmp_path / "a.db")
     storage.init_db(db)

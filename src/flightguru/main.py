@@ -77,7 +77,9 @@ def main() -> int:
     # 4) Pick the cheapest, compare to history, record it.
     cheapest = offers[0]
     link = build_deep_link(cheapest, settings)
-    last_price = storage.get_last_total_price()
+    last_price = storage.get_last_total_price(
+        origin=settings.origin, destination=settings.destination
+    )
     decision = delta.decide(cheapest.total_price, last_price, settings.target_price)
     storage.save_snapshot(
         cheapest, settings.origin, settings.destination, link, decision.below_target

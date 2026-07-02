@@ -47,6 +47,7 @@ SAMPLE = {
 def test_parses_best_and_other_flights():
     offers = parse_serpapi(SAMPLE, "2026-07-20", "USD")
     assert len(offers) == 2
+    assert offers[0].currency == "USD"  # no search_parameters -> falls back to requested
 
     ai = offers[0]
     assert ai.source == "SerpApi"
@@ -60,3 +61,21 @@ def test_parses_best_and_other_flights():
     assert ek.stops == 1
     assert ek.duration == "20h 55m"
     assert "DXB" in ek.layovers
+
+
+def test_uses_currency_serpapi_reports_not_requested():
+    # We asked for USD, but SerpApi says it priced in EUR. The offer must carry
+    # EUR so the downstream currency guard can catch the mismatch (M2).
+    resp = dict(SAMPLE, search_parameters={"currency": "EUR"})
+    offers = parse_serpapi(resp, "2026-07-20", "USD")
+    assert offers and all(o.currency == "EUR" for o in offers)
+
+
+def test_currency_guard_drops_serpapi_mismatch_end_to_end():
+    # A price that is really EUR must not survive a USD-preferred normalize().
+    from flightguru.normalize import normalize
+
+    resp = dict(SAMPLE, search_parameters={"currency": "EUR"})
+    offers = parse_serpapi(resp, "2026-07-20", "USD")
+    kept = normalize(offers, prefer_currency="USD")
+    assert kept == []  # mislabeling avoided: nothing wrongly compared to a USD target

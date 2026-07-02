@@ -109,15 +109,30 @@ def save_snapshot(
         conn.close()
 
 
-def get_last_total_price(path: str = DB_PATH) -> float | None:
-    """The total price from the most recent snapshot, or None if no history."""
+def get_last_total_price(
+    path: str = DB_PATH, *, origin: str | None = None, destination: str | None = None
+) -> float | None:
+    """The total price from the most recent snapshot, or None if no history.
+
+    When ``origin`` and ``destination`` are given, only snapshots for that exact
+    route are considered. This keeps the "dropped since last check" comparison
+    honest: changing ORIGIN/DESTINATION no longer compares this route's price
+    against an unrelated route's last snapshot.
+    """
     if not os.path.exists(path):
         return None
     conn = _connect(path)
     try:
-        row = conn.execute(
-            "SELECT total_price FROM price_snapshots ORDER BY id DESC LIMIT 1"
-        ).fetchone()
+        if origin is not None and destination is not None:
+            row = conn.execute(
+                "SELECT total_price FROM price_snapshots WHERE origin = ? AND destination = ? "
+                "ORDER BY id DESC LIMIT 1",
+                (origin, destination),
+            ).fetchone()
+        else:
+            row = conn.execute(
+                "SELECT total_price FROM price_snapshots ORDER BY id DESC LIMIT 1"
+            ).fetchone()
         return row[0] if row else None
     finally:
         conn.close()

@@ -2,6 +2,66 @@
 
 All notable changes to FlightGuru. Newest first.
 
+## [Unreleased] — Route-scoped history + duration/retry polish (2026-07-01)
+- **Correctness (M3):** `get_last_total_price` now accepts `origin`/`destination`
+  and `main.py` passes them, so the "dropped since last check" comparison only
+  looks at snapshots for the *same route*. Changing `ORIGIN`/`DESTINATION` no
+  longer compares this route's price against an unrelated route's last snapshot.
+- **Fix (L1):** `iso_duration_to_minutes` now parses the day component
+  (`P1DT2H30M`); a >24h itinerary was previously undercounted by a full day in
+  the displayed duration.
+- **Fix (L2):** `net.py` no longer retries a non-JSON 200 response. A malformed
+  body is a hard failure (retrying the identical request can't fix it), so it now
+  fails fast instead of burning all attempts + backoff. The raised message
+  carries no URL, so no secret can leak from this path.
+- (L3, the "no booking link -> no alert" guard, left as intentional defensive
+  code — see report.)
+- Tests: +4 (`test_storage`, `test_normalize`, `test_net`); 71 → 75 passing.
+- Found by the `/tester` production review — see `NOTES_flightguru_tester_report.md`.
+
+## [Unreleased] — SerpApi currency stamping (2026-07-01)
+- **Correctness fix (M2):** `parse_serpapi` stamped every offer with the
+  *requested* currency, so the currency guard in `normalize()` could never catch
+  a mismatch (we'd labeled it ourselves). It now stamps the currency SerpApi
+  reports having used (`search_parameters.currency`), falling back to the
+  requested currency only when SerpApi doesn't echo one. If SerpApi ever prices
+  in a different currency than asked, the offer now carries the real currency and
+  the guard drops it instead of comparing, e.g., EUR against a USD target.
+  (SerpApi gives no per-price currency, so this reflects its reported currency,
+  not a per-price guarantee — Duffel remains the verified-currency source.)
+- Verified: a fixture where SerpApi reports EUR while USD was requested now
+  produces EUR offers, and a USD-preferred `normalize()` drops them.
+- Tests: +3 (`test_serpapi.py`); 68 → 71 passing.
+- Found by the `/tester` production review — see `NOTES_flightguru_tester_report.md`.
+
+## [Unreleased] — control.json fails closed (2026-07-01)
+- **Robustness fix (M1):** a malformed `control.json` (bad JSON, wrong shape, or
+  a mistyped date like `2026-8-1`) used to crash the run with an uncaught
+  exception — the load happened before `main.py`'s try/except. Since that file is
+  meant to be hand-edited, a typo was a real risk. `load_control` now catches
+  parse errors and `check_active` catches bad dates; both **fail closed** —
+  monitoring is reported "not active" with a clear reason and **no API calls are
+  made** until the file is fixed. Added a `Control.error` field.
+- Verified end-to-end: `python -m flightguru.main` with a trailing-comma
+  `control.json` now exits 0 with `Skipped - control.json could not be read (...)`
+  instead of a traceback.
+- Tests: +4 (`test_control.py`); 64 → 68 passing.
+- Found by the `/tester` production review — see `NOTES_flightguru_tester_report.md`.
+
+## [Unreleased] — Secret redaction in logs (2026-07-01)
+- **Security fix (C1):** secrets could leak into logs on a request failure. A
+  `requests` exception message contains the request URL, so a Telegram network
+  error printed the bot token (`/bot<token>/sendMessage`) and a SerpApi 4xx
+  printed the `api_key=` query param — into the console (GitHub Actions logs,
+  world-readable on a public repo) and the log file. `log.py` now runs every
+  record through a `_RedactingFilter` that strips Telegram bot tokens, `api_key=`
+  params, and `Bearer` tokens before any handler sees them, so all current and
+  future log lines are scrubbed. Added `log.redact()` (pure helper).
+- Verified end-to-end: the same failing Telegram request that used to leak the
+  token now logs `/bot<redacted>`.
+- Tests: +5 (`test_log_redaction.py`); 59 → 64 passing.
+- Found by the `/tester` production review — see `NOTES_flightguru_tester_report.md`.
+
 ## [Unreleased] — Currency guard (2026-07-01)
 - `normalize()` now takes an optional `prefer_currency`. `main.py` passes
   `settings.currency`, so offers priced in another currency are excluded from the
