@@ -2,6 +2,39 @@
 
 All notable changes to FlightGuru. Newest first.
 
+## [Unreleased] — v3 scanner, phase 1: airport lookup (2026-08-09)
+
+Start of the v3 rebuild: FlightGuru moves from a background price *monitor* on one
+fixed route to an on-demand *scanner* driven by Telegram chat. Plan in
+`docs/PLAN_v3_scanner.md`.
+
+- **New `airports.py`** — resolves what a person types into airport codes. Accepts
+  a code (`JFK`), a city (`new york`, `mumbai`), shorthand (`nyc`, `la`), and old
+  names (`bombay`, `calcutta`). Ambiguous names are asked about, not guessed.
+- **New `data/airports.csv`** — 4,036 airports with IATA code, city, country and
+  coordinates, trimmed from the public-domain OurAirports dataset by
+  `scripts/build_airports.py`.
+- **New nearby-airport search** — `alternatives()` finds cheaper airports within a
+  drivable radius, so a New York search also prices Stewart, and a Hartford search
+  reaches Tweed New Haven.
+- Tests: +28 (`test_airports.py`); 75 → 103 passing.
+
+Three design decisions worth recording, each of which started as a bug:
+
+- **Airport size is filtered, but never ranked on.** The first cut kept only
+  large/medium airports and would have thrown away Tweed New Haven (Avelo) and
+  Portsmouth (Breeze) — precisely the fields with the cheap fares. Ranking
+  suggestions by size had the same effect, replacing HVN with Boston. Suggestions
+  are now ordered purely by distance.
+- **Heliports and business-jet fields are excluded explicitly.** The source data
+  marks Teterboro, Hanscom and two Manhattan heliports as having scheduled
+  service. Left in, they sat closer to JFK than Newark did and pushed Newark out
+  of the suggestions entirely.
+- **"Which airports serve this place" and "what else could I fly from" are
+  separate questions with separate radii** (35 mi and 100 mi). Using one radius
+  for both made "New Haven" resolve to all of New York and bury the airport
+  actually asked for.
+
 ## [Unreleased] — Route-scoped history + duration/retry polish (2026-07-01)
 - **Correctness (M3):** `get_last_total_price` now accepts `origin`/`destination`
   and `main.py` passes them, so the "dropped since last check" comparison only
