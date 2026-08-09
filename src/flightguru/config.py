@@ -1,11 +1,13 @@
-"""Configuration and secrets loading.
+"""Secrets and defaults.
 
-All settings come from environment variables so that secrets never live in the
-code. Locally they are read from a ``.env`` file (git-ignored); in GitHub
-Actions they come from encrypted repository secrets.
+v2 kept the whole route here — origin, destination, date range, price target —
+because there was only ever one route and it never changed. v3 gets the route
+from the conversation, so this file is down to what genuinely belongs in the
+environment: API keys, and a few defaults worth being able to tune without a
+code change.
 
-Flight data comes from multiple providers (Duffel + SerpApi); each has its own
-key and is only used if that key is actually configured.
+Locally these come from a ``.env`` file (git-ignored). On Railway they come from
+the service's environment variables.
 """
 
 from __future__ import annotations
@@ -28,7 +30,7 @@ def _require(name: str) -> str:
         raise RuntimeError(
             f"Missing required environment variable: {name}. "
             f"Copy .env.example to .env and fill it in "
-            f"(or add it as a GitHub Actions secret)."
+            f"(or set it in the Railway service variables)."
         )
     return value
 
@@ -36,8 +38,7 @@ def _require(name: str) -> str:
 def _int_env(name: str, default: int) -> int:
     """Read an int env var, falling back to ``default`` if unset or non-numeric.
 
-    Keeps a stray typo (e.g. ``TARGET_PRICE=7O0``) from crashing the whole run
-    with an uncaught ValueError that ``main.py`` doesn't catch.
+    A typo in a setting should not take the bot down.
     """
     raw = os.environ.get(name, "").strip()
     if not raw:
@@ -46,6 +47,23 @@ def _int_env(name: str, default: int) -> int:
         return int(raw)
     except ValueError:
         return default
+
+
+def _float_env(name: str, default: float) -> float:
+    raw = os.environ.get(name, "").strip()
+    if not raw:
+        return default
+    try:
+        return float(raw)
+    except ValueError:
+        return default
+
+
+def _bool_env(name: str, default: bool) -> bool:
+    raw = os.environ.get(name, "").strip().lower()
+    if not raw:
+        return default
+    return raw in ("1", "true", "yes", "on")
 
 
 def _looks_placeholder(value: str) -> bool:
@@ -58,63 +76,57 @@ def _looks_placeholder(value: str) -> bool:
 
 @dataclass(frozen=True)
 class Settings:
-    """All values the app needs for one run. Immutable once loaded."""
+    """Everything the bot needs that is not part of a specific search."""
 
-    duffel_token: str
-    duffel_version: str
     serpapi_key: str
     telegram_bot_token: str
+
+    # Who the bot will talk to. Empty means anyone who finds it, which is not
+    # what you want for a bot spending your API quota -- see allowed_chat().
     telegram_chat_id: str
-    providers: tuple[str, ...]  # which providers to use, e.g. ("duffel", "serpapi")
-    origin: str
-    destination: str
-    search_start_date: str      # earliest departure date to check (YYYY-MM-DD)
-    search_end_date: str        # latest departure date to check (YYYY-MM-DD)
-    search_date_step: int       # days between dates checked (1 = every day)
-    search_max_workers: int     # how many provider requests to run at once (bounded)
-    serpapi_max_dates: int      # cap SerpApi to N dates/run (protects its free quota)
-    target_price: int
-    currency: str
-    notify_every_run: bool      # True = report every run; False = only on alert/drop
+
+    currency: str = "USD"
+
+    # Nearby-airport search. Radius is in miles; roughly a two-hour drive.
+    nearby_radius_miles: float = 100.0
+    nearby_enabled: bool = True
+    nearby_destination: bool = False
+
+    # How long to hold a Telegram long-poll open. Higher means fewer requests
+    # and faster replies; Telegram allows up to 50.
+    poll_timeout: int = 30
+
+    @property
+    def serpapi_configured(self) -> bool:
+        return not _looks_placeholder(self.serpapi_key)
+
+    def allowed_chat(self, chat_id: str | int) -> bool:
+        """True if this chat is permitted to use the bot.
+
+        The bot's token is effectively public the moment anyone messages it, and
+        every search costs quota, so by default only the configured chat gets
+        answers. Setting TELEGRAM_CHAT_ID to "*" opens it to anyone, which is
+        only sensible for a throwaway bot.
+        """
+        allowed = (self.telegram_chat_id or "").strip()
+        if allowed == "*":
+            return True
+        if not allowed:
+            return False
+        return str(chat_id).strip() in {
+            part.strip() for part in allowed.split(",") if part.strip()
+        }
 
 
 def load_settings() -> Settings:
     """Build a Settings object from the current environment."""
-    providers = tuple(
-        p.strip().lower()
-        for p in os.environ.get("PROVIDERS", "duffel,serpapi").split(",")
-        if p.strip()
-    )
     return Settings(
-        duffel_token=os.environ.get("DUFFEL_ACCESS_TOKEN", "").strip(),
-        duffel_version=os.environ.get("DUFFEL_VERSION", "v2").strip(),
         serpapi_key=os.environ.get("SERPAPI_API_KEY", "").strip(),
         telegram_bot_token=_require("TELEGRAM_BOT_TOKEN"),
-        telegram_chat_id=_require("TELEGRAM_CHAT_ID"),
-        providers=providers,
-        origin=os.environ.get("ORIGIN", "BOM").strip(),
-        destination=os.environ.get("DESTINATION", "JFK").strip(),
-        search_start_date=os.environ.get("SEARCH_START_DATE", "2026-07-20").strip(),
-        search_end_date=os.environ.get("SEARCH_END_DATE", "2026-08-14").strip(),
-        search_date_step=_int_env("SEARCH_DATE_STEP", 1),
-        search_max_workers=_int_env("SEARCH_MAX_WORKERS", 6),
-        serpapi_max_dates=_int_env("SERPAPI_MAX_DATES", 8),
-        target_price=_int_env("TARGET_PRICE", 700),
-        currency=os.environ.get("CURRENCY", "USD").strip(),
-        notify_every_run=os.environ.get("NOTIFY_EVERY_RUN", "true").strip().lower()
-        in ("1", "true", "yes", "on"),
+        telegram_chat_id=os.environ.get("TELEGRAM_CHAT_ID", "").strip(),
+        currency=os.environ.get("CURRENCY", "USD").strip() or "USD",
+        nearby_radius_miles=_float_env("NEARBY_RADIUS_MILES", 100.0),
+        nearby_enabled=_bool_env("NEARBY_ENABLED", True),
+        nearby_destination=_bool_env("NEARBY_DESTINATION", False),
+        poll_timeout=_int_env("POLL_TIMEOUT", 30),
     )
-
-
-def provider_configured(settings: Settings, name: str) -> bool:
-    """True if the given provider has a real (non-placeholder) key."""
-    if name == "duffel":
-        return not _looks_placeholder(settings.duffel_token)
-    if name == "serpapi":
-        return not _looks_placeholder(settings.serpapi_key)
-    return False
-
-
-def enabled_providers(settings: Settings) -> list[str]:
-    """The requested providers that are actually configured with a real key."""
-    return [p for p in settings.providers if provider_configured(settings, p)]

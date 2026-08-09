@@ -9,22 +9,14 @@ from flightguru.config import Settings
 
 def _settings(**overrides) -> Settings:
     base = dict(
-        duffel_token="dummy-duffel-token-1234567890",
-        duffel_version="v2",
         serpapi_key="serpapi_realkey1234567890abcdef",
-        telegram_bot_token="t",
-        telegram_chat_id="c",
-        providers=("duffel", "serpapi"),
-        origin="BOM",
-        destination="JFK",
-        search_start_date="2026-07-20",
-        search_end_date="2026-08-14",
-        search_date_step=1,
-        search_max_workers=6,
-        serpapi_max_dates=8,
-        target_price=700,
+        telegram_bot_token="123456:test-token",
+        telegram_chat_id="6889043609",
         currency="USD",
-        notify_every_run=True,
+        nearby_radius_miles=100.0,
+        nearby_enabled=True,
+        nearby_destination=False,
+        poll_timeout=30,
     )
     base.update(overrides)
     return Settings(**base)

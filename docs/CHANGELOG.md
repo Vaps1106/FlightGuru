@@ -2,6 +2,134 @@
 
 All notable changes to FlightGuru. Newest first.
 
+## [Unreleased] — v3 scanner, phase 3: the Telegram chat bot (2026-08-09)
+
+FlightGuru is now a chat bot. You text it, it asks where you're going, it searches,
+it answers — and it tells you when a nearby airport is cheaper or much faster.
+
+- **New `bot.py`** — reads messages, runs the conversation, sends results. One
+  in-progress conversation per chat. Only chats listed in `TELEGRAM_CHAT_ID` are
+  answered, since the token is effectively public and every search costs quota.
+- **New `conversation.py`** — the question flow as a state machine. One question at
+  a time; a bad answer re-asks rather than advancing; `back` corrects, `cancel` quits.
+- **New `parse.py`** — reads "12 sep", "next friday", "in 2 weeks", "2 adults 1 child".
+  Refuses to guess on genuinely ambiguous input: `03/09` gets a question, not a month.
+- **New `telegram.py`** — long polling, message splitting, update offsets. Replaces
+  the send-only `notify.py`.
+- **US states** — `CT`, `connecticut`, `FL`, `texas` all resolve.
+- **"Worth a look"** — flags a notably faster itinerary that costs only a little more.
+  Cheapest still leads; it just stops hiding that a nonstop sits $14 away.
+- **v2 monitor archived** to `archive/v2-monitor/` with a README explaining what each
+  piece did and why it went. Confirmed no longer needed by the owner.
+- Tests: +73 (`test_bot`, `test_conversation`, `test_parse`, `test_telegram`, plus
+  state and speed cases); 192 → 265 passing.
+
+### Bugs found by testing it for real, not by the test suite
+
+Four failures the suite missed, in the order they surfaced. Recorded because
+three of them share one cause: **a single point of failure on a network that
+drops connections.**
+
+1. **Polling gave up after one attempt.** Every other call in the project retried
+   three times; `getUpdates` asked for one. On a link resetting a quarter of
+   connections the bot went deaf for five seconds at a time and looked broken.
+2. **Sending gave up after three.** Messages arrived and searches ran, but the
+   *replies* failed to deliver. Indistinguishable from "found nothing" — which is
+   exactly how it was reported.
+3. **A reset during startup killed the process.** `get_me()` ran before any of the
+   retry logic and its failure propagated out of `run_forever`. The bot died in
+   under a second and never reached the loop where the fixes lived.
+4. **Resolved airports were flattened back into text and re-parsed.** The chat
+   resolved "NYC" to three airports, then the bot joined them into the string
+   `"EWR, JFK, LGA"` and asked the resolver to look that up as a place name.
+   Every search from a multi-airport city failed — NYC, CT, any state, any city
+   with more than one airport. Only single-airport searches worked.
+
+Bug 4 is the one worth learning from. The bot tests stubbed `scan` — the exact
+function that was broken — so they proved the bot *called* something, not that the
+something worked. Tests now fake only the HTTP layer and run the whole path, and
+they fail against the old code.
+
+Also fixed while testing: `CT` had no state support and fell through to matching
+airport *names* containing those letters, offering Mactan and Victoria Falls as
+places to fly from Connecticut. `NY` did the same via Albany. Short input no longer
+substring-matches names at all, and business-jet fields (Teterboro, Hanscom) are now
+excluded from state and city groups, not just from nearby suggestions.
+
+### Known environment issue
+
+The development machine's network resets roughly a quarter of TLS handshakes to
+`api.telegram.org` specifically, while other hosts are unaffected — the signature of
+ISP-level filtering of Telegram. The retry work above makes the bot survive it, but
+it is not a code problem and Railway is not expected to see it.
+
+## [Unreleased] — v3 scanner, phase 2: round trips, multi-city, airport comparison (2026-08-09)
+
+- **New `request.py`** — `SearchRequest` describes one trip as a value instead of
+  global environment variables. Round trip, one way and multi-city; several
+  airports per side; passengers, cabin, stops, bags. `validate()` returns every
+  problem at once so a chat can ask about all of them in one message.
+- **New `providers/flights.py`** — Google Flights search built from a
+  `SearchRequest`. Replaces v2's `serpapi.py`, which could only ask for one-way,
+  one origin, one destination, one date.
+- **New `compare.py`** — groups results by the airport each fare actually departs
+  from and decides whether a nearby airport is worth suggesting.
+- **New `scan.py`** — end-to-end orchestration, plus plain-text message formatting.
+- `Offer` gains `origin_airport`, `destination_airport`, `return_date`,
+  `trip_type`, and the Google tokens for the return leg and booking link. All
+  default, so existing callers are unaffected.
+- Tests: +89 (`test_request`, `test_flights`, `test_compare`, `test_scan`);
+  103 → 192 passing.
+
+Two rules the comparison enforces, both of which are about honesty rather than
+arithmetic:
+
+- **The airport you asked for always leads the answer.** A cheaper neighbour is
+  reported as an extra, never substituted in. Quoting a Newark departure to
+  someone who asked about JFK answers a question they did not ask.
+- **A fare's airport is read off the itinerary, never assumed.** With several
+  origins in one query, assuming the requested airport would credit a Newark
+  fare to JFK and invert the entire comparison. Offers with no airport recorded
+  are dropped rather than guessed at.
+
+Verified live end to end: `new york` → `los angeles` returned fares from four
+origin airports in a single search (LGA $307, JFK $307, HPN $331, EWR $359),
+picked LGA, and correctly reported no worthwhile alternative rather than
+manufacturing one.
+
+## [Unreleased] — v3 scanner, phase 1: airport lookup (2026-08-09)
+
+Start of the v3 rebuild: FlightGuru moves from a background price *monitor* on one
+fixed route to an on-demand *scanner* driven by Telegram chat. Plan in
+`docs/PLAN_v3_scanner.md`.
+
+- **New `airports.py`** — resolves what a person types into airport codes. Accepts
+  a code (`JFK`), a city (`new york`, `mumbai`), shorthand (`nyc`, `la`), and old
+  names (`bombay`, `calcutta`). Ambiguous names are asked about, not guessed.
+- **New `data/airports.csv`** — 4,036 airports with IATA code, city, country and
+  coordinates, trimmed from the public-domain OurAirports dataset by
+  `scripts/build_airports.py`.
+- **New nearby-airport search** — `alternatives()` finds cheaper airports within a
+  drivable radius, so a New York search also prices Stewart, and a Hartford search
+  reaches Tweed New Haven.
+- Tests: +28 (`test_airports.py`); 75 → 103 passing.
+
+Three design decisions worth recording, each of which started as a bug:
+
+- **Airport size is filtered, but never ranked on.** The first cut kept only
+  large/medium airports and would have thrown away Tweed New Haven (Avelo) and
+  Portsmouth (Breeze) — precisely the fields with the cheap fares. Ranking
+  suggestions by size had the same effect, replacing HVN with Boston. Suggestions
+  are now ordered purely by distance.
+- **Heliports and business-jet fields are excluded explicitly.** The source data
+  marks Teterboro, Hanscom and two Manhattan heliports as having scheduled
+  service. Left in, they sat closer to JFK than Newark did and pushed Newark out
+  of the suggestions entirely.
+- **"Which airports serve this place" and "what else could I fly from" are
+  separate questions with separate radii** (35 mi and 100 mi). Using one radius
+  for both made "New Haven" resolve to all of New York and bury the airport
+  actually asked for.
+
 ## [Unreleased] — Route-scoped history + duration/retry polish (2026-07-01)
 - **Correctness (M3):** `get_last_total_price` now accepts `origin`/`destination`
   and `main.py` passes them, so the "dropped since last check" comparison only
