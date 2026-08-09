@@ -26,7 +26,7 @@ def req(origins=("JFK",), **overrides) -> SearchRequest:
     return SearchRequest(**base)
 
 
-def offer(price, origin, airline="Delta") -> Offer:
+def offer(price, origin, airline="Delta", minutes=385, stops=0) -> Offer:
     return Offer(
         source="GoogleFlights",
         search_date="2026-09-12",
@@ -35,12 +35,13 @@ def offer(price, origin, airline="Delta") -> Offer:
         depart_time="2026-09-12 08:15",
         arrive_time="2026-09-12 11:40",
         duration="6h 25m",
-        stops=0,
+        stops=stops,
         layovers="",
         base_price=0.0,
         taxes_fees=0.0,
         total_price=price,
         currency="USD",
+        duration_minutes=minutes,
         origin_airport=origin,
         destination_airport="LAX",
     )
@@ -172,6 +173,86 @@ def test_option_reports_its_city():
     offers = [offer(240, "JFK"), offer(137, "HVN")]
     result = compare.compare(offers, req())
     assert result.suggestions[0].city == "New Haven"
+
+
+# --- a slightly dearer flight that is obviously the better buy --------------
+
+
+def test_a_much_faster_flight_for_a_small_premium_is_flagged():
+    """The real case: $70 with a 7-hour layover vs $84 nonstop.
+
+    Ranking on price alone would send the eleven-hour itinerary and say nothing
+    about the nonstop $14 away.
+    """
+    offers = [
+        offer(70, "BDL", airline="Breeze", minutes=692, stops=1),
+        offer(84, "HVN", airline="Avelo", minutes=170, stops=0),
+    ]
+    result = compare.compare(offers, req(origins=("BDL",)))
+    assert result.best.airport == "BDL"          # cheapest still leads
+    assert result.faster is not None
+    assert result.faster.airport == "HVN"
+
+
+def test_a_faster_flight_that_costs_far_more_is_not_flagged():
+    offers = [
+        offer(70, "BDL", minutes=692),
+        offer(600, "HVN", minutes=170),
+    ]
+    assert compare.compare(offers, req(origins=("BDL",))).faster is None
+
+
+def test_a_marginally_faster_flight_is_not_flagged():
+    """Twenty minutes saved is not a reason to spend more."""
+    offers = [
+        offer(70, "BDL", minutes=200),
+        offer(84, "HVN", minutes=180),
+    ]
+    assert compare.compare(offers, req(origins=("BDL",))).faster is None
+
+
+def test_a_faster_option_from_the_same_airport_is_found():
+    """The better trade is often a different flight from the same airport."""
+    offers = [
+        offer(70, "BDL", minutes=692, stops=2),
+        offer(95, "BDL", airline="JetBlue", minutes=200, stops=0),
+    ]
+    faster = compare.compare(offers, req(origins=("BDL",))).faster
+    assert faster is not None and faster.airport == "BDL"
+
+
+def test_an_already_suggested_airport_is_not_reported_twice():
+    """If it is already the cheaper option, it does not need a second heading."""
+    offers = [
+        offer(240, "JFK", minutes=692),
+        offer(137, "EWR", minutes=170),
+    ]
+    result = compare.compare(offers, req())
+    assert [s.airport for s in result.suggestions] == ["EWR"]
+    assert result.faster is None
+
+
+def test_the_largest_time_saving_wins():
+    offers = [
+        offer(70, "BDL", minutes=692),
+        offer(80, "HVN", minutes=400),
+        offer(85, "PVD", minutes=170),
+    ]
+    assert compare.compare(offers, req(origins=("BDL",))).faster.airport == "PVD"
+
+
+def test_a_bigger_premium_is_allowed_on_an_expensive_fare():
+    """25% of a long-haul is a fairer ceiling than a flat $75."""
+    offers = [
+        offer(900, "JFK", minutes=1400),
+        offer(1050, "EWR", minutes=800),
+    ]
+    assert compare.compare(offers, req()).faster is not None
+
+
+def test_offers_without_a_duration_are_not_compared_on_speed():
+    offers = [offer(70, "BDL", minutes=0), offer(84, "HVN", minutes=170)]
+    assert compare.compare(offers, req(origins=("BDL",))).faster is None
 
 
 # --- the New Haven scenario end to end --------------------------------------

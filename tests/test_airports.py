@@ -124,6 +124,63 @@ def test_resolution_states_are_mutually_exclusive():
         assert not (r.ok and r.ambiguous)
 
 
+# --- US states --------------------------------------------------------------
+
+
+def test_state_code_resolves_to_that_state():
+    r = A.resolve("CT")
+    assert r.ok and r.matched_as == "state"
+    assert set(A.codes(r.airports).split(",")) == {"BDL", "HVN"}
+
+
+def test_state_name_matches_its_code():
+    assert A.codes(A.resolve("connecticut").airports) == A.codes(A.resolve("CT").airports)
+
+
+def test_state_is_case_insensitive():
+    assert A.codes(A.resolve("ct").airports) == A.codes(A.resolve("CT").airports)
+
+
+def test_large_state_is_capped_to_its_busiest_airports():
+    codes = A.codes(A.resolve("texas").airports).split(",")
+    assert len(codes) <= A.MAX_STATE_AIRPORTS
+    assert "DFW" in codes
+
+
+def test_city_shorthand_beats_a_state_code_where_it_is_the_common_meaning():
+    """"LA" means Los Angeles, not Louisiana. "NY" means the city."""
+    assert "LAX" in A.codes(A.resolve("LA").airports)
+    assert set(A.codes(A.resolve("NY").airports).split(",")) == {"JFK", "LGA", "EWR"}
+
+
+def test_states_never_offer_business_jet_fields():
+    """New Jersey must not suggest Teterboro; Massachusetts must not offer Hanscom."""
+    assert "TEB" not in A.codes(A.resolve("NJ").airports)
+    assert "BED" not in A.codes(A.resolve("MA").airports)
+
+
+def test_a_direct_code_still_returns_a_private_field():
+    """Filtering is about what we volunteer, not about refusing what was asked."""
+    assert A.resolve("TEB").ok
+
+
+# --- short input does not match by substring --------------------------------
+
+
+def test_two_letter_input_does_not_substring_match_airport_names():
+    """"ct" is inside Mactan and Victoria; "ny" is inside Albany.
+
+    Before the guard, asking for CT confidently offered Victoria Falls.
+    """
+    for junk in ("xy", "qz", "zq"):
+        assert not A.resolve(junk).ok
+
+
+def test_unknown_short_input_is_reported_not_guessed():
+    result = A.resolve("xy")
+    assert not result.ok and not result.ambiguous
+
+
 # --- nearby / alternatives --------------------------------------------------
 
 
