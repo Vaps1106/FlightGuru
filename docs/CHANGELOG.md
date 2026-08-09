@@ -2,6 +2,40 @@
 
 All notable changes to FlightGuru. Newest first.
 
+## [Unreleased] — v3 scanner, phase 2: round trips, multi-city, airport comparison (2026-08-09)
+
+- **New `request.py`** — `SearchRequest` describes one trip as a value instead of
+  global environment variables. Round trip, one way and multi-city; several
+  airports per side; passengers, cabin, stops, bags. `validate()` returns every
+  problem at once so a chat can ask about all of them in one message.
+- **New `providers/flights.py`** — Google Flights search built from a
+  `SearchRequest`. Replaces v2's `serpapi.py`, which could only ask for one-way,
+  one origin, one destination, one date.
+- **New `compare.py`** — groups results by the airport each fare actually departs
+  from and decides whether a nearby airport is worth suggesting.
+- **New `scan.py`** — end-to-end orchestration, plus plain-text message formatting.
+- `Offer` gains `origin_airport`, `destination_airport`, `return_date`,
+  `trip_type`, and the Google tokens for the return leg and booking link. All
+  default, so existing callers are unaffected.
+- Tests: +89 (`test_request`, `test_flights`, `test_compare`, `test_scan`);
+  103 → 192 passing.
+
+Two rules the comparison enforces, both of which are about honesty rather than
+arithmetic:
+
+- **The airport you asked for always leads the answer.** A cheaper neighbour is
+  reported as an extra, never substituted in. Quoting a Newark departure to
+  someone who asked about JFK answers a question they did not ask.
+- **A fare's airport is read off the itinerary, never assumed.** With several
+  origins in one query, assuming the requested airport would credit a Newark
+  fare to JFK and invert the entire comparison. Offers with no airport recorded
+  are dropped rather than guessed at.
+
+Verified live end to end: `new york` → `los angeles` returned fares from four
+origin airports in a single search (LGA $307, JFK $307, HPN $331, EWR $359),
+picked LGA, and correctly reported no worthwhile alternative rather than
+manufacturing one.
+
 ## [Unreleased] — v3 scanner, phase 1: airport lookup (2026-08-09)
 
 Start of the v3 rebuild: FlightGuru moves from a background price *monitor* on one
