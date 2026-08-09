@@ -48,3 +48,34 @@ a provider is configured and that the Telegram bot is reachable. Exit code 0 = O
   run, so its full change history lives in the repo — every clone is a backup.
 - **Rebuild from scratch:** clone repo, set the Actions secrets, run `flightguru`.
 - The retired v1 remains in `archive/v1-powershell/` as a fallback.
+
+## Recreating the "FlightGuru Bot" scheduled task
+
+Registered 2026-08-09. Run this from the repo folder if the task is ever removed
+and needs rebuilding:
+
+```powershell
+$root    = 'C:\vaibhav\Claude AI\FlightGuru'
+$script  = Join-Path $root 'scripts\start_bot.ps1'
+$action  = New-ScheduledTaskAction -Execute 'powershell.exe' `
+             -Argument "-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$script`"" `
+             -WorkingDirectory $root
+$trigger = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME
+$settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries `
+             -DontStopIfGoingOnBatteries -StartWhenAvailable `
+             -ExecutionTimeLimit ([TimeSpan]::Zero) `
+             -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 5)
+Register-ScheduledTask -TaskName 'FlightGuru Bot' -Action $action -Trigger $trigger `
+             -Settings $settings -Force
+```
+
+Two settings are load-bearing:
+
+- `-ExecutionTimeLimit ([TimeSpan]::Zero)` — without it Windows kills the task
+  after three days. The bot is meant to run indefinitely.
+- `-AllowStartIfOnBatteries` / `-DontStopIfGoingOnBatteries` — otherwise the bot
+  stops the moment a laptop is unplugged, which is exactly when you are most
+  likely to be searching for a flight.
+
+Verify with `Get-ScheduledTaskInfo -TaskName 'FlightGuru Bot'`; `LastTaskResult`
+of 0 means it started cleanly.

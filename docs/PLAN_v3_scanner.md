@@ -158,14 +158,15 @@ Repeat identical searches within an hour are served from SerpApi's cache, free.
    "you'd save $47 from EWR" comparison. Tests.
 4. **Conversation** — state machine + input parsing. Tests (no network needed).
 5. **Bot** — Telegram polling loop, wire it all together. Live test.
-6. **Deploy** — Railway or PC, plus README/CHANGELOG.
+6. **Deploy** — runs on the PC via a scheduled task, plus README/CHANGELOG.
 
 ## Decisions
 
-1. **Hosting: Railway** (decided 2026-08-09). Always on, so the bot answers with the PC off. Same
-   platform as PriceGuru, so the deploy path is already familiar. Long-polling rather than a
-   webhook — no public URL or TLS to manage, and it survives restarts without re-registering.
-   Development still runs locally against the same code; only the start command differs.
+1. **Hosting: the owner's PC**, started at login by a Windows scheduled task
+   (decided 2026-08-09). Railway was chosen first and then ruled out once the code was ready,
+   so `Procfile` and `railway.json` remain in the repo but are unused. Long-polling rather than
+   a webhook, which is what makes running anywhere possible — no public URL or TLS to manage.
+   Trade accepted: the bot answers only while the PC is awake. See `docs/DEPLOYMENT.md`.
 
 ## Open decisions
 

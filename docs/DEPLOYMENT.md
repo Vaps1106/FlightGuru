@@ -1,52 +1,114 @@
 # DEPLOYMENT.md
 
 ## Where it runs
-GitHub Actions — no server. Two workflows:
-- `flightguru.yml` — **manual-only** price check (`workflow_dispatch`); runs when you
-  trigger it. Commits updated `data/flightguru.db` back to the repo.
-- `tests.yml` — runs the test suite on every push/PR.
 
-## How to trigger a run
-- **GitHub mobile app / website:** Actions → flightguru → Run workflow.
-- **Command line:** `gh workflow run flightguru.yml`
-- **Claude mobile app:** with the GitHub connector enabled (Actions read+write),
-  ask Claude to "run the flightguru workflow in Vaps1106/FlightGuru on master".
-- **Phone Shortcut:** POST to
-  `https://api.github.com/repos/Vaps1106/FlightGuru/actions/workflows/flightguru.yml/dispatches`
-  with body `{"ref":"master"}` and a fine-grained token (Actions: read+write).
+**On your own PC**, started automatically at login by a Windows scheduled task.
 
-## The four cloud secrets
-Set these as GitHub Actions secrets (the cloud equivalent of `.env`):
-`DUFFEL_ACCESS_TOKEN`, `SERPAPI_API_KEY`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`.
+Cloud hosting was considered and deliberately not used — see "Why not the cloud"
+below. The `Procfile` and `railway.json` in the repo are leftovers from that
+evaluation and are not in use.
 
-## One-time setup (via the GitHub CLI)
+The practical consequence: **the bot answers only while your PC is on and awake.**
+Message it from the road with the machine asleep and nothing comes back until you
+are home. Everything else works exactly the same.
+
+## Day-to-day
+
+| To do this | Run this |
+|---|---|
+| Start the bot | `.\scripts\start_bot.ps1` |
+| Stop the bot | `.\scripts\stop_bot.ps1` |
+| See what it's doing | `Get-Content logs\flightguru.log -Tail 20` |
+| Check it's healthy | `$env:PYTHONPATH='src'; .venv\Scripts\python.exe -m flightguru.main --health` |
+
+The bot runs windowless via `pythonw.exe`, so there is nothing on screen. That is
+why the log matters: it is timestamped, rotated, and has secrets stripped out, so
+it is safe to read and safe to paste when asking for help.
+
+Starting twice is harmless — `start_bot.ps1` refuses if the bot is already up.
+That guard exists because two bots polling the same Telegram token each receive a
+random share of the messages, which breaks a conversation apart mid-question with
+no obvious cause.
+
+**A single bot appears as two processes.** On Windows the venv's `pythonw.exe` is
+a small redirector that launches the base interpreter as its child. Only the child
+is polling. Seeing two PIDs is normal.
+
+## The scheduled task
+
+Named **FlightGuru Bot**, triggered at logon.
+
 ```powershell
-# from the repo folder
-gh secret set DUFFEL_ACCESS_TOKEN  --body "duffel_live_..."
-gh secret set SERPAPI_API_KEY      --body "your_serpapi_key"
-gh secret set TELEGRAM_BOT_TOKEN   --body "12345:abc..."
-gh secret set TELEGRAM_CHAT_ID     --body "6889043609"
-
-git push -u origin master           # publish the code
-gh workflow run flightguru.yml         # trigger one cloud run to verify
-gh run watch                        # watch it finish
+Get-ScheduledTask     -TaskName 'FlightGuru Bot'   # is it registered
+Get-ScheduledTaskInfo -TaskName 'FlightGuru Bot'   # LastTaskResult 0 = fine
+Start-ScheduledTask   -TaskName 'FlightGuru Bot'   # run it now
+Disable-ScheduledTask -TaskName 'FlightGuru Bot'   # stop it starting at login
+Enable-ScheduledTask  -TaskName 'FlightGuru Bot'
+Unregister-ScheduledTask -TaskName 'FlightGuru Bot' -Confirm:$false   # remove it
 ```
-Or do it in the browser: Settings → Secrets and variables → Actions → New secret,
-then Actions tab → flightguru → Run workflow.
 
-## Release checklist
-1. `pytest` green and `python scripts/check_secrets.py` passes.
-2. Four secrets set (above). `.env` is NOT pushed (git-ignored).
-3. Code pushed; `tests` workflow passes on GitHub.
-4. `flightguru` triggered once; a Telegram message arrives and `data/flightguru.db`
-   is committed back by the run.
-5. Confirm the 8-hour schedule is active (Actions tab shows upcoming runs).
+Disabling the task does not stop a bot that is already running — use
+`stop_bot.ps1` for that.
 
-## Re-enabling an automatic schedule (optional)
-The flightguru workflow is manual-only by default. To make it run on a timer again, add a
-`schedule` block under `on:` in `flightguru.yml`, e.g. `- cron: "0 */8 * * *"`
-(every 8 hours, UTC). Format is `minute hour day month weekday`.
+To recreate the task from scratch, see the registration command in
+`docs/OPERATIONS.md`.
 
-## Notes
-- Manual runs have no timing concerns; each run is one search + one Telegram report.
-- Keep the repo **private**; usage stays within the free Actions minutes.
+## Configuration
+
+Everything lives in `.env` at the repo root, which is git-ignored. Copy
+`.env.example` and fill it in.
+
+| Variable | Required | Notes |
+|---|---|---|
+| `TELEGRAM_BOT_TOKEN` | yes | From @BotFather |
+| `TELEGRAM_CHAT_ID` | yes | Who may use the bot. **Empty means it ignores everyone** — deliberately, so a leaked token cannot burn your search quota. `*` allows anyone. Comma-separate for several people. |
+| `SERPAPI_API_KEY` | yes | Free tier ~100 searches/month, shared with PriceGuru |
+| `CURRENCY` | no | Default `USD` |
+| `NEARBY_ENABLED` | no | Default `true` |
+| `NEARBY_RADIUS_MILES` | no | Default `100`, about a two-hour drive |
+| `NEARBY_DESTINATION` | no | Default `false` — also check airports near where you're landing |
+| `POLL_TIMEOUT` | no | Default `30` seconds |
+
+Changing `.env` needs a restart: `.\scripts\stop_bot.ps1` then `.\scripts\start_bot.ps1`.
+
+## Search quota
+
+One trip search costs **one** SerpApi search no matter how many airports it
+covers, because Google Flights takes a comma-separated airport list. Repeating an
+identical search within an hour is served from cache and is free.
+
+At roughly 100 searches a month, that is about three trip searches a day. The bot
+does not run anything in the background, so nothing is spent unless you ask.
+
+## Troubleshooting
+
+**The bot doesn't reply at all.**
+Check it is running (`.\scripts\start_bot.ps1` will say so), then check
+`TELEGRAM_CHAT_ID` is set — an empty value silently ignores every message, and the
+log says so at startup.
+
+**The log is full of `ConnectionResetError` to api.telegram.org.**
+Expected on this machine. Its network resets roughly a quarter of TLS handshakes
+to `api.telegram.org` specifically, while other hosts are unaffected — the
+signature of ISP-level filtering of Telegram. The bot retries enough to work
+through it (4 attempts per poll, 6 per message, and a failure at startup is not
+fatal). If replies feel slow, this is why. It is not a fault in the code.
+
+**Searches fail but Telegram works.**
+Check the SerpApi quota at serpapi.com. `--health` reports whether the key is
+configured but deliberately does not spend a search to test it.
+
+## Why not the cloud
+
+Railway was chosen first, then ruled out by the owner on 2026-08-09 after the code
+was already portable. It would have kept the bot answering with the PC off, and it
+would have avoided the Telegram connection resets described above.
+
+Running locally is the trade that was chosen instead: no hosting account, no
+monthly cost, nothing running anywhere you cannot see. The code has no dependency
+on where it runs, so this can be revisited without changes.
+
+## Tests
+
+`tests.yml` runs the suite on every push and PR. The old `flightguru.yml`
+monitoring workflow is archived at `archive/v2-monitor/workflows/`.
