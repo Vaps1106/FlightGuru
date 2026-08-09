@@ -43,9 +43,9 @@ class ScanResult:
         return not self.problems and self.comparison is not None
 
 
-def build_request(
-    origin_text: str,
-    destination_text: str,
+def plan(
+    origins: tuple[airports.Airport, ...],
+    destinations: tuple[airports.Airport, ...],
     depart_date: str,
     return_date: str | None = None,
     trip_type: str = ROUND_TRIP,
@@ -54,37 +54,20 @@ def build_request(
     radius_miles: float = airports.DEFAULT_RADIUS_MILES,
     **passenger_options,
 ) -> tuple[SearchRequest | None, list[str], dict[str, float]]:
-    """Turn what someone typed into a search, plus any problems and distances.
+    """Build a search from airports that are *already resolved*.
 
-    Returns ``(request, problems, distances)``. When a place cannot be resolved
-    the problem text names the alternatives rather than just failing, so the
-    chat can ask a useful follow-up question.
+    This is the core. Callers that start from free text go through
+    ``build_request``, which resolves first and then lands here.
+
+    The split exists because of a real bug: the chat resolves "NYC" into three
+    airports, and the bot then joined them back into the string "EWR, JFK, LGA"
+    and handed that to the resolver as if it were a place name. It is not one,
+    so every search from a multi-airport city failed. Resolved airports should
+    never be flattened to text and re-parsed.
     """
-    problems: list[str] = []
-
-    origin = airports.resolve(origin_text)
-    destination = airports.resolve(destination_text)
-
-    for label, resolution in (("from", origin), ("to", destination)):
-        if resolution.ambiguous:
-            options = "; ".join(
-                f"{a.iata} ({a.city}, {a.region})" for a in resolution.candidates
-            )
-            problems.append(
-                f"Which {resolution.query} did you mean, flying {label}? {options}"
-            )
-        elif not resolution.ok:
-            problems.append(
-                f"I don't know an airport or city called "
-                f"\"{resolution.query}\" (flying {label})."
-            )
-
-    if problems:
-        return None, problems, {}
-
     request = SearchRequest(
-        origins=origin.airports,
-        destinations=destination.airports,
+        origins=origins,
+        destinations=destinations,
         depart_date=depart_date,
         return_date=return_date,
         trip_type=trip_type,
@@ -112,30 +95,82 @@ def build_request(
     return request, [], distances
 
 
+def build_request(
+    origin_text: str,
+    destination_text: str,
+    depart_date: str,
+    **options,
+) -> tuple[SearchRequest | None, list[str], dict[str, float]]:
+    """Resolve two place names, then plan the search.
+
+    Returns ``(request, problems, distances)``. When a place cannot be resolved
+    the problem text names the alternatives rather than just failing, so the
+    chat can ask a useful follow-up question.
+    """
+    problems: list[str] = []
+
+    origin = airports.resolve(origin_text)
+    destination = airports.resolve(destination_text)
+
+    for label, resolution in (("from", origin), ("to", destination)):
+        if resolution.ambiguous:
+            options_text = "; ".join(
+                f"{a.iata} ({a.city}, {a.region})" for a in resolution.candidates
+            )
+            problems.append(
+                f"Which {resolution.query} did you mean, flying {label}? {options_text}"
+            )
+        elif not resolution.ok:
+            problems.append(
+                f"I don't know an airport or city called "
+                f"\"{resolution.query}\" (flying {label})."
+            )
+
+    if problems:
+        return None, problems, {}
+
+    return plan(origin.airports, destination.airports, depart_date, **options)
+
+
 def scan(
     origin_text: str,
     destination_text: str,
     depart_date: str,
     api_key: str,
-    return_date: str | None = None,
-    trip_type: str = ROUND_TRIP,
-    include_nearby: bool = True,
-    nearby_destination: bool = False,
-    radius_miles: float = airports.DEFAULT_RADIUS_MILES,
-    **passenger_options,
+    **options,
 ) -> ScanResult:
-    """Run one scan. Exactly one search is spent against the API quota."""
+    """Run one scan from two place names. One search against the API quota."""
     request, problems, distances = build_request(
-        origin_text,
-        destination_text,
-        depart_date,
-        return_date=return_date,
-        trip_type=trip_type,
-        include_nearby=include_nearby,
-        nearby_destination=nearby_destination,
-        radius_miles=radius_miles,
-        **passenger_options,
+        origin_text, destination_text, depart_date, **options
     )
+    return _execute(request, problems, distances, api_key)
+
+
+def scan_airports(
+    origins: tuple[airports.Airport, ...],
+    destinations: tuple[airports.Airport, ...],
+    depart_date: str,
+    api_key: str,
+    **options,
+) -> ScanResult:
+    """Run one scan from airports the caller has already resolved.
+
+    What the chat uses: the conversation resolved the place names when it asked
+    the questions, so re-parsing them here would be both wasteful and wrong.
+    """
+    request, problems, distances = plan(
+        origins, destinations, depart_date, **options
+    )
+    return _execute(request, problems, distances, api_key)
+
+
+def _execute(
+    request: SearchRequest | None,
+    problems: list[str],
+    distances: dict[str, float],
+    api_key: str,
+) -> ScanResult:
+    """Run a planned search and compare the results."""
     if request is None:
         return ScanResult(request=None, comparison=None, problems=tuple(problems))
 
@@ -204,7 +239,36 @@ def format_result(result: ScanResult) -> str:
     if not comparison.has_suggestions:
         lines += ["", "No nearby airport was meaningfully cheaper."]
 
+    faster = comparison.faster
+    if faster is not None:
+        premium = faster.price - best.price
+        saved = best.offer.duration_minutes - faster.offer.duration_minutes
+        cost = (
+            f"{premium:.0f} more"
+            if premium > 0
+            else f"{abs(premium):.0f} less"
+        )
+        lines += [
+            "",
+            f"WORTH A LOOK - {_hours(saved)} faster for {best.offer.currency} {cost}",
+            f"{faster.offer.currency} {faster.price:.0f} from {faster.airport} "
+            f"({faster.city})",
+            f"{faster.offer.airline}  {faster.offer.flight_numbers}",
+            f"Depart {faster.offer.depart_time} -> arrive {faster.offer.arrive_time}",
+            _stops_line(faster.offer),
+        ]
+
     return "\n".join(lines)
+
+
+def _hours(minutes: int) -> str:
+    """"5h 10m" from a count of minutes, for talking about time saved."""
+    hours, mins = divmod(max(0, minutes), 60)
+    if hours and mins:
+        return f"{hours}h {mins}m"
+    if hours:
+        return f"{hours}h"
+    return f"{mins}m"
 
 
 def _stops_line(offer) -> str:

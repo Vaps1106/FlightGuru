@@ -2,6 +2,67 @@
 
 All notable changes to FlightGuru. Newest first.
 
+## [Unreleased] — v3 scanner, phase 3: the Telegram chat bot (2026-08-09)
+
+FlightGuru is now a chat bot. You text it, it asks where you're going, it searches,
+it answers — and it tells you when a nearby airport is cheaper or much faster.
+
+- **New `bot.py`** — reads messages, runs the conversation, sends results. One
+  in-progress conversation per chat. Only chats listed in `TELEGRAM_CHAT_ID` are
+  answered, since the token is effectively public and every search costs quota.
+- **New `conversation.py`** — the question flow as a state machine. One question at
+  a time; a bad answer re-asks rather than advancing; `back` corrects, `cancel` quits.
+- **New `parse.py`** — reads "12 sep", "next friday", "in 2 weeks", "2 adults 1 child".
+  Refuses to guess on genuinely ambiguous input: `03/09` gets a question, not a month.
+- **New `telegram.py`** — long polling, message splitting, update offsets. Replaces
+  the send-only `notify.py`.
+- **US states** — `CT`, `connecticut`, `FL`, `texas` all resolve.
+- **"Worth a look"** — flags a notably faster itinerary that costs only a little more.
+  Cheapest still leads; it just stops hiding that a nonstop sits $14 away.
+- **v2 monitor archived** to `archive/v2-monitor/` with a README explaining what each
+  piece did and why it went. Confirmed no longer needed by the owner.
+- Tests: +73 (`test_bot`, `test_conversation`, `test_parse`, `test_telegram`, plus
+  state and speed cases); 192 → 265 passing.
+
+### Bugs found by testing it for real, not by the test suite
+
+Four failures the suite missed, in the order they surfaced. Recorded because
+three of them share one cause: **a single point of failure on a network that
+drops connections.**
+
+1. **Polling gave up after one attempt.** Every other call in the project retried
+   three times; `getUpdates` asked for one. On a link resetting a quarter of
+   connections the bot went deaf for five seconds at a time and looked broken.
+2. **Sending gave up after three.** Messages arrived and searches ran, but the
+   *replies* failed to deliver. Indistinguishable from "found nothing" — which is
+   exactly how it was reported.
+3. **A reset during startup killed the process.** `get_me()` ran before any of the
+   retry logic and its failure propagated out of `run_forever`. The bot died in
+   under a second and never reached the loop where the fixes lived.
+4. **Resolved airports were flattened back into text and re-parsed.** The chat
+   resolved "NYC" to three airports, then the bot joined them into the string
+   `"EWR, JFK, LGA"` and asked the resolver to look that up as a place name.
+   Every search from a multi-airport city failed — NYC, CT, any state, any city
+   with more than one airport. Only single-airport searches worked.
+
+Bug 4 is the one worth learning from. The bot tests stubbed `scan` — the exact
+function that was broken — so they proved the bot *called* something, not that the
+something worked. Tests now fake only the HTTP layer and run the whole path, and
+they fail against the old code.
+
+Also fixed while testing: `CT` had no state support and fell through to matching
+airport *names* containing those letters, offering Mactan and Victoria Falls as
+places to fly from Connecticut. `NY` did the same via Albany. Short input no longer
+substring-matches names at all, and business-jet fields (Teterboro, Hanscom) are now
+excluded from state and city groups, not just from nearby suggestions.
+
+### Known environment issue
+
+The development machine's network resets roughly a quarter of TLS handshakes to
+`api.telegram.org` specifically, while other hosts are unaffected — the signature of
+ISP-level filtering of Telegram. The retry work above makes the bot survive it, but
+it is not a code problem and Railway is not expected to see it.
+
 ## [Unreleased] — v3 scanner, phase 2: round trips, multi-city, airport comparison (2026-08-09)
 
 - **New `request.py`** — `SearchRequest` describes one trip as a value instead of

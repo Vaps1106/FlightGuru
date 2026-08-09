@@ -148,6 +148,7 @@ def parse(response_json: dict, request: SearchRequest) -> list[Offer]:
                 depart_time=(first.get("departure_airport") or {}).get("time", ""),
                 arrive_time=(last.get("arrival_airport") or {}).get("time", ""),
                 duration=fmt_minutes(itinerary.get("total_duration") or 0),
+                duration_minutes=int(itinerary.get("total_duration") or 0),
                 stops=len(legs) - 1,
                 layovers=layovers,
                 base_price=0.0,

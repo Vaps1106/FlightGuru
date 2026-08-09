@@ -47,6 +47,10 @@ MAX_NEARBY = 4
 # Portsmouth, Stewart, Islip, Atlantic City -- are all classed medium or larger.
 SUGGESTABLE_SIZES = ("large", "medium")
 
+# A whole state can hold dozens of airfields. Cap it at the busiest few, or a
+# search for "texas" becomes an unreadable comma-separated wall.
+MAX_STATE_AIRPORTS = 5
+
 # Airports the source data marks as having scheduled service but which are in
 # practice private / business-aviation fields you cannot buy an airline ticket
 # from. Left in unchecked they crowd out real options -- Teterboro sits 21 miles
@@ -95,6 +99,7 @@ class Airport:
 # the obvious ones is enough.
 METRO_ALIASES: dict[str, tuple[str, ...]] = {
     "nyc": ("JFK", "LGA", "EWR"),
+    "ny": ("JFK", "LGA", "EWR"),
     "new york": ("JFK", "LGA", "EWR"),
     "new york city": ("JFK", "LGA", "EWR"),
     "la": ("LAX", "BUR", "SNA", "LGB", "ONT"),
@@ -121,6 +126,40 @@ METRO_ALIASES: dict[str, tuple[str, ...]] = {
     "delhi": ("DEL",),
     "mumbai": ("BOM",),
 }
+
+# US states, by abbreviation and full name. People say "flying from CT" as
+# readily as they name a city, and the airport table already carries an ISO
+# region code (US-CT) to match against.
+#
+# This also fixes a nastier problem: without it, "CT" fell through to matching
+# airport *names* containing that pair of letters, and confidently offered
+# Mactan, Victoria Falls and Victoria BC as places to fly from Connecticut.
+US_STATES: dict[str, str] = {
+    "alabama": "AL", "alaska": "AK", "arizona": "AZ", "arkansas": "AR",
+    "california": "CA", "colorado": "CO", "connecticut": "CT", "delaware": "DE",
+    "florida": "FL", "georgia": "GA", "hawaii": "HI", "idaho": "ID",
+    "illinois": "IL", "indiana": "IN", "iowa": "IA", "kansas": "KS",
+    "kentucky": "KY", "louisiana": "LA", "maine": "ME", "maryland": "MD",
+    "massachusetts": "MA", "michigan": "MI", "minnesota": "MN",
+    "mississippi": "MS", "missouri": "MO", "montana": "MT", "nebraska": "NE",
+    "nevada": "NV", "new hampshire": "NH", "new jersey": "NJ",
+    "new mexico": "NM", "north carolina": "NC", "north dakota": "ND",
+    "ohio": "OH", "oklahoma": "OK", "oregon": "OR", "pennsylvania": "PA",
+    "rhode island": "RI", "south carolina": "SC", "south dakota": "SD",
+    "tennessee": "TN", "texas": "TX", "utah": "UT", "vermont": "VT",
+    "virginia": "VA", "washington state": "WA", "west virginia": "WV",
+    "wisconsin": "WI", "wyoming": "WY",
+}
+
+# The two-letter forms, plus the ones that collide with something else. "LA"
+# means Los Angeles far more often than Louisiana, and "DC" is a city, so both
+# are left to the metro aliases above.
+STATE_CODES = {code for code in US_STATES.values()} - {"LA"}
+
+# Below this many characters, matching against airport *names* produces
+# nonsense: two letters appear inside hundreds of unrelated names. Short input
+# is only ever matched against codes, metros, states and exact city names.
+MIN_NAME_MATCH_CHARS = 4
 
 # Names that changed, or that people still use the old form of.
 CITY_SYNONYMS: dict[str, str] = {
@@ -314,11 +353,24 @@ def resolve(
 
     table = _load()
 
-    # 3. Exact city name. Careful: plenty of city names are not unique --
+    # 3. A US state, by name or two-letter code.
+    state = US_STATES.get(query)
+    if state is None and query.upper() in STATE_CODES:
+        state = query.upper()
+    if state is not None:
+        in_state = _offerable(a for a in table if a.region == f"US-{state}")
+        if in_state:
+            return Resolution(
+                query=text,
+                airports=tuple(sorted(in_state, key=_prominence)[:MAX_STATE_AIRPORTS]),
+                matched_as="state",
+            )
+
+    # 4. Exact city name. Careful: plenty of city names are not unique --
     #    Springfield exists in Missouri, Illinois and Massachusetts, and merging
     #    them into one search would quote a fare from the wrong side of the
     #    country. Distinct places means ask, not guess.
-    exact = tuple(a for a in table if _normalize(a.city) == query)
+    exact = tuple(_offerable(a for a in table if _normalize(a.city) == query))
     if exact:
         if len(_places(exact)) > 1:
             ranked = sorted(exact, key=_prominence)
@@ -326,12 +378,22 @@ def resolve(
         group = _expand_around(exact, radius_miles) if expand_metro else exact
         return Resolution(query=text, airports=group, matched_as="city")
 
-    # 4. Partial match on city, then on airport name. Ambiguity is handed back
+    # 5. Partial match on city, then on airport name. Ambiguity is handed back
     #    as candidates rather than guessed at -- booking the wrong Springfield
     #    is an expensive mistake to make on someone's behalf.
-    partial = [a for a in table if query in _normalize(a.city)]
+    #
+    #    Short input never reaches the name match: two or three letters occur
+    #    inside hundreds of unrelated airport names, and the results are noise
+    #    dressed up as answers.
+    if len(query) < MIN_NAME_MATCH_CHARS:
+        # "ny" is inside Albany and Nizhny Novgorod; "ct" is inside Mactan and
+        # Victoria. Anything this short that has not matched a code, metro,
+        # state or exact city is not going to be rescued by substring search.
+        return Resolution(query=text)
+
+    partial = _offerable(a for a in table if query in _normalize(a.city))
     if not partial:
-        partial = [a for a in table if query in _normalize(a.name)]
+        partial = _offerable(a for a in table if query in _normalize(a.name))
 
     if not partial:
         return Resolution(query=text)
@@ -349,6 +411,16 @@ def resolve(
 
 
 _SIZE_RANK = {"large": 0, "medium": 1, "small": 2}
+
+
+def _offerable(airports) -> list[Airport]:
+    """Drop airports we should never put forward as somewhere to fly from.
+
+    Applied wherever a *group* is built -- a state, a city, a metro sweep --
+    but not to a direct code lookup: if someone types TEB they know what they
+    are asking for, and should get it.
+    """
+    return [a for a in airports if a.iata not in NON_COMMERCIAL]
 
 
 def _places(airports) -> set[tuple[str, str, str]]:
@@ -373,7 +445,7 @@ def _expand_around(
     This is what makes "new york" include Newark, which files its city as
     "Newark" and so never matches the name "New York".
     """
-    group: dict[str, Airport] = {a.iata: a for a in seeds}
+    group: dict[str, Airport] = {a.iata: a for a in _offerable(seeds)}
     for seed in seeds:
         for other, _ in nearby(seed.iata, radius_miles, limit=MAX_NEARBY):
             group.setdefault(other.iata, other)

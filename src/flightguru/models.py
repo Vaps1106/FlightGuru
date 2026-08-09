@@ -33,6 +33,11 @@ class Offer:
     total_price: float
     currency: str
 
+    # ``duration`` is for display; this is the same span in minutes, kept so two
+    # itineraries can actually be compared against each other. A formatted
+    # string like "11h 32m" cannot be.
+    duration_minutes: int = 0
+
     # Which airports this itinerary actually uses. Taken from the flight legs,
     # not from the search, so a Newark fare found while searching "JFK,LGA,EWR"
     # is correctly attributed to Newark.

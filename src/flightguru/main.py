@@ -1,156 +1,101 @@
-"""FlightGuru v2 entry point + CLI.
+"""FlightGuru v3 entry point.
 
-Pipeline: control gate -> search (providers) -> normalize/validate -> record
-history + delta -> Telegram report. Production hardening (Phase 5): retries with
-429-aware backoff (net.py), rotating logs (log.py), and health checks.
+    python -m flightguru.main                     start the Telegram bot
+    python -m flightguru.main --health            check keys and connectivity
+    python -m flightguru.main --search FROM TO DATE [RETURN]
+                                                  one search from the terminal
 
-Run a check:   python -m flightguru.main
-Health check:  python -m flightguru.main --health
+The ``--search`` form is the dry-run path: it exercises the whole pipeline --
+airport resolution, nearby airports, the Google Flights query, the comparison and
+the message -- without needing Telegram. Same code the bot calls.
 """
 
 from __future__ import annotations
 
+import argparse
 import sys
-from datetime import datetime, timezone
 
-from . import delta, notify, search as search_mod, storage
-from .config import enabled_providers, load_settings
-from .control import check_active, load_control
-from .deeplink import build_deep_link
+from .config import load_settings
 from .health import run_health
 from .log import get_logger
-from .normalize import normalize
+from .request import ONE_WAY, ROUND_TRIP
+from .scan import build_request, format_result, scan
 
 log = get_logger()
 
 
-def main() -> int:
-    now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+def run_search(args, settings) -> int:
+    """One search from the command line."""
+    trip_type = ROUND_TRIP if args.ret else ONE_WAY
 
-    # 1) Usage control gate — bail before any API work if paused / out of window.
-    active, reason = check_active(load_control())
-    if not active:
-        log.info(f"[FlightGuru v2] Skipped - {reason}. No API calls made. ({now})")
-        return 0
-
-    # 2) Config — missing secrets means we stop cleanly, not crash.
-    try:
-        settings = load_settings()
-    except RuntimeError as exc:
-        log.info(f"[FlightGuru v2] Config incomplete: {exc}")
-        return 0
-
-    providers = enabled_providers(settings)
-    if not providers:
-        log.info(
-            "[FlightGuru v2] No flight providers configured. Add DUFFEL_ACCESS_TOKEN "
-            "and/or SERPAPI_API_KEY (see README). No search performed."
+    if args.dry_run:
+        # Resolve and plan the search, but spend nothing. Useful for checking
+        # which airports would be included before committing a search.
+        request, problems, distances = build_request(
+            args.origin,
+            args.destination,
+            args.date,
+            return_date=args.ret,
+            trip_type=trip_type,
+            include_nearby=settings.nearby_enabled,
+            nearby_destination=settings.nearby_destination,
+            radius_miles=settings.nearby_radius_miles,
+            adults=args.adults,
+            currency=settings.currency,
         )
-        return 0
+        if request is None:
+            for problem in problems:
+                log.info(problem)
+            return 1
 
-    log.info(
-        f"[FlightGuru v2] Searching {settings.origin}->{settings.destination} "
-        f"{settings.search_start_date}..{settings.search_end_date} "
-        f"via {', '.join(providers)} ({now})"
-    )
-
-    # 3) Search every provider across the date range.
-    errors: list[str] = []
-    raw = search_mod.search_all(
-        settings, on_error=lambda p, d, e: errors.append(f"{p} {d}: {e}")
-    )
-    offers = normalize(raw, prefer_currency=settings.currency)
-    for warn in errors[:5]:
-        log.warning(f"  warn: {warn}")
-
-    if not offers:
-        other = {o.currency for o in raw if o.currency and o.currency.upper() != settings.currency.upper()}
-        if other:
-            log.info(
-                f"No verified offers in {settings.currency}; a provider priced in "
-                f"{', '.join(sorted(other))}. Set CURRENCY to match to use those."
-            )
-        else:
-            log.info("No verified offers found in range.")
-        return 0
-
-    # 4) Pick the cheapest, compare to history, record it.
-    cheapest = offers[0]
-    link = build_deep_link(cheapest, settings)
-    last_price = storage.get_last_total_price(
-        origin=settings.origin, destination=settings.destination
-    )
-    decision = delta.decide(cheapest.total_price, last_price, settings.target_price)
-    storage.save_snapshot(
-        cheapest, settings.origin, settings.destination, link, decision.below_target
-    )
-
-    # 5) Report the cheapest verified fare (once).
-    log.info("Cheapest in range:")
-    log.info(
-        f"  {cheapest.currency} {cheapest.total_price:.0f}  ({cheapest.source})  "
-        f"{cheapest.airline}  {cheapest.flight_numbers}"
-    )
-    if cheapest.base_price > 0:
-        log.info(f"  fare {cheapest.base_price:.0f} + tax/fees {cheapest.taxes_fees:.0f}")
-    log.info(
-        f"  {cheapest.search_date}  depart {cheapest.depart_time}  "
-        f"arrive {cheapest.arrive_time}  {cheapest.duration}  {cheapest.stops} stop(s)"
-    )
-    if cheapest.layovers:
-        log.info(f"  via {cheapest.layovers}")
-    log.info(f"  book: {link}")
-    log.info(
-        f"  target < {settings.currency} {settings.target_price}: "
-        f"{'YES, below target' if decision.below_target else 'no'}"
-    )
-    if last_price is not None:
-        line = f"  last recorded: {settings.currency} {last_price:.0f}"
-        if decision.dropped:
-            line += f"  (dropped {settings.currency} {decision.drop_amount:.0f} since last check)"
-        log.info(line)
-    log.info(f"  history: {storage.count_snapshots()} snapshot(s) in {storage.DB_PATH}")
-
-    # 6) Notify. Rule: no booking link -> no alert (per spec).
-    if link is None:
-        log.info("  Telegram: suppressed - no booking link could be built.")
-        return 0
-    last_alert = storage.last_alert_price(cheapest.search_date)
-    send_alert = delta.should_send_alert(decision, cheapest.total_price, last_alert)
-    if decision.alert and not send_alert:
+        log.info(f"Would search: {request.describe()}")
+        log.info(f"  you asked for : {', '.join(a.iata for a in request.origins)}")
         log.info(
-            f"  Alert: suppressed - already alerted this fare at "
-            f"{settings.currency} {last_alert:.0f} and it is not lower now."
+            f"  also checking : "
+            f"{', '.join(f'{a.iata} ({distances.get(a.iata, 0):.0f} mi)' for a in request.alternative_origins) or 'nothing nearby'}"
         )
-    if settings.notify_every_run or send_alert or decision.dropped:
-        message = notify.build_message(settings, cheapest, decision, link, now)
-        try:
-            ok = notify.send_telegram(settings, message)
-            log.info(f"  Telegram: {'sent' if ok else 'not sent (API said not ok)'}")
-            if ok and send_alert:
-                storage.record_alert(cheapest, settings.currency)
-        except Exception as exc:  # noqa: BLE001 - report, don't crash the run
-            log.error(f"  Telegram: failed - {exc}")
-    else:
-        log.info("  Telegram: skipped (no new alert; NOTIFY_EVERY_RUN is off).")
-    return 0
+        log.info(f"  arriving at   : {', '.join(a.iata for a in request.all_destinations)}")
+        log.info("  API calls that would be spent: 1")
+        return 0
+
+    if not settings.serpapi_configured:
+        log.error("No SerpApi key configured. Set SERPAPI_API_KEY in .env.")
+        return 1
+
+    result = scan(
+        origin_text=args.origin,
+        destination_text=args.destination,
+        depart_date=args.date,
+        api_key=settings.serpapi_key,
+        return_date=args.ret,
+        trip_type=trip_type,
+        include_nearby=settings.nearby_enabled,
+        nearby_destination=settings.nearby_destination,
+        radius_miles=settings.nearby_radius_miles,
+        adults=args.adults,
+        currency=settings.currency,
+    )
+    print(format_result(result))
+    return 0 if result.ok else 1
 
 
 def cli(argv: list[str] | None = None) -> int:
-    import argparse
-
     parser = argparse.ArgumentParser(prog="flightguru")
-    parser.add_argument(
-        "--health", action="store_true", help="run health checks and exit"
-    )
+    parser.add_argument("--health", action="store_true", help="check keys and connectivity")
+    parser.add_argument("--search", nargs="+", metavar=("FROM TO DATE", ""),
+                        help="one search: FROM TO DATE [RETURN_DATE]")
+    parser.add_argument("--adults", type=int, default=1, help="number of adults (default 1)")
+    parser.add_argument("--dry-run", action="store_true",
+                        help="with --search: plan it but spend no API call")
     args = parser.parse_args(argv)
 
+    try:
+        settings = load_settings()
+    except RuntimeError as exc:
+        log.error(str(exc))
+        return 1
+
     if args.health:
-        try:
-            settings = load_settings()
-        except RuntimeError as exc:
-            log.info(f"Config incomplete: {exc}")
-            return 1
         all_ok = True
         for name, ok, info in run_health(settings):
             log.info(f"  health {name}: {'OK' if ok else 'FAIL'}  {info}")
@@ -158,7 +103,19 @@ def cli(argv: list[str] | None = None) -> int:
         log.info(f"Health: {'ALL OK' if all_ok else 'PROBLEMS FOUND'}")
         return 0 if all_ok else 1
 
-    return main()
+    if args.search:
+        if len(args.search) < 3:
+            log.error("--search needs at least FROM TO DATE")
+            return 1
+        args.origin, args.destination, args.date = args.search[:3]
+        args.ret = args.search[3] if len(args.search) > 3 else None
+        return run_search(args, settings)
+
+    # No flags: run the bot.
+    from .bot import Bot
+
+    Bot(settings).run_forever()
+    return 0
 
 
 if __name__ == "__main__":

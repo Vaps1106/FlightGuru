@@ -35,6 +35,23 @@ MIN_SAVING_FRACTION = 0.04
 # numbers nobody reads.
 MAX_SUGGESTIONS = 3
 
+# --- when a slightly dearer flight is obviously the better buy --------------
+#
+# Ranking on price alone can hand you an eleven-hour itinerary with a seven-hour
+# layover while a nonstop sits fourteen dollars away. That is technically the
+# cheapest flight and plainly the wrong answer, so a notably faster option gets
+# mentioned alongside it. The cheapest still leads -- this only stops the bot
+# staying quiet about the trade.
+
+# How much more we will mention paying, in absolute terms...
+MAX_PREMIUM = 75.0
+# ...or as a share of the cheapest fare, whichever is more generous. Keeps the
+# rule sane for both a $70 hop and a $900 long-haul.
+MAX_PREMIUM_FRACTION = 0.25
+
+# How much time has to be saved before it is worth raising at all.
+MIN_TIME_SAVED_MINUTES = 120
+
 
 @dataclass(frozen=True)
 class AirportOption:
@@ -61,11 +78,14 @@ class Comparison:
     ``best`` is the cheapest option from an airport they asked for.
     ``suggestions`` are cheaper alternatives, biggest saving first, already
     filtered to ones worth mentioning.
+    ``faster`` is an option that costs a little more but saves real time --
+    None unless one clearly qualifies.
     """
 
     best: AirportOption | None
     suggestions: tuple[AirportOption, ...] = ()
     all_options: tuple[AirportOption, ...] = ()
+    faster: AirportOption | None = None
 
     @property
     def has_suggestions(self) -> bool:
@@ -133,12 +153,65 @@ def compare(
         option
         for option in options
         if option.airport != best.airport and _worth_mentioning(best.price, option.price)
-    ]
+    ][:MAX_SUGGESTIONS]
 
     return Comparison(
         best=best,
-        suggestions=tuple(suggestions[:MAX_SUGGESTIONS]),
+        suggestions=tuple(suggestions),
         all_options=tuple(options),
+        faster=_find_faster(offers, best, suggestions, distances),
+    )
+
+
+def _find_faster(
+    offers: list[Offer],
+    best: AirportOption,
+    suggestions: list[AirportOption],
+    distances: dict[str, float],
+) -> AirportOption | None:
+    """A notably quicker itinerary that costs only a little more, if one exists.
+
+    Searches every offer, not just the cheapest per airport, because the better
+    trade is often a different flight from the *same* airport -- a nonstop an
+    hour later for twenty dollars more.
+
+    Anything already reported as a cheaper alternative is skipped: it is being
+    recommended on price already, and saying it twice reads like two findings.
+    """
+    if best.offer.duration_minutes <= 0:
+        return None
+
+    ceiling = max(MAX_PREMIUM, best.price * MAX_PREMIUM_FRACTION)
+    already = {option.airport for option in suggestions}
+
+    candidates: list[tuple[int, float, Offer]] = []
+    for offer in offers:
+        if offer.duration_minutes <= 0 or offer.total_price <= 0:
+            continue
+        if offer.origin_airport in already:
+            continue
+
+        premium = offer.total_price - best.price
+        # A cheaper *and* faster flight from the best airport is simply a better
+        # version of the same answer, so allow a negative premium here.
+        if premium > ceiling:
+            continue
+
+        saved = best.offer.duration_minutes - offer.duration_minutes
+        if saved < MIN_TIME_SAVED_MINUTES:
+            continue
+
+        candidates.append((saved, offer.total_price, offer))
+
+    if not candidates:
+        return None
+
+    # Most time saved wins; cheaper breaks a tie.
+    saved, _, winner = max(candidates, key=lambda c: (c[0], -c[1]))
+    return AirportOption(
+        airport=winner.origin_airport,
+        offer=winner,
+        distance_miles=distances.get(winner.origin_airport),
     )
 
 
